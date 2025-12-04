@@ -46,7 +46,7 @@ const QRScannerApp = () => {
     if (!qrData) return;
 
     try {
-      // Formato: EVENT:xxx|LEAD:xxx|TS:xxx|HASH:xxx
+      // Formato: EVENT:xxx|LEAD:xxx|TS:xxx|HASH:xxx|INVITADO:xxx
       const parts = qrData.split('|').reduce((acc, part) => {
         const [key, value] = part.split(':');
         acc[key] = value;
@@ -55,6 +55,7 @@ const QRScannerApp = () => {
 
       const scanData = {
         eventId: parts.EVENT,
+        invitadoId: parts.INVITADO,
         leadId: parts.LEAD,
         hash: parts.HASH,
         scannedAt: new Date().toISOString(),
