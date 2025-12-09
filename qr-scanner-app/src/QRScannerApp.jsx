@@ -12,7 +12,7 @@ const QRScannerApp = () => {
   const [pendingScans, setPendingScans] = useState([]);
 
   // URL de tu webhook
-  const WEBHOOK_URL = 'https://starknbn.ddns.net/webhook/scan-qr';
+  const WEBHOOK_URL = 'https://veqeventos.app.n8n.cloud/webhook-test/scan-qr';
 
   // Manejo de conexión online / offline
   useEffect(() => {
