@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
-import { Camera, CheckCircle, XCircle, Users, Clock, Wifi, WifiOff } from 'lucide-react';
+import {
+  Camera,
+  CheckCircle,
+  XCircle,
+  Users,
+  Clock,
+  Wifi,
+  WifiOff,
+} from 'lucide-react';
+import './QRScannerApp.css';
 
 const QRScannerApp = () => {
   const [scanning, setScanning] = useState(false);
@@ -11,10 +20,8 @@ const QRScannerApp = () => {
   );
   const [pendingScans, setPendingScans] = useState([]);
 
-  // URL de tu webhook
   const WEBHOOK_URL = 'https://starknbn.ddns.net/webhook/scan-qr';
 
-  // Manejo de conexión online / offline
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -22,7 +29,6 @@ const QRScannerApp = () => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // cargar escaneos pendientes del localStorage
     const saved = localStorage.getItem('pendingScans');
     if (saved) {
       setPendingScans(JSON.parse(saved));
@@ -34,7 +40,6 @@ const QRScannerApp = () => {
     };
   }, []);
 
-  // Sincronizar cuando vuelva el internet
   useEffect(() => {
     if (isOnline && pendingScans.length > 0) {
       syncPendingScans();
@@ -46,7 +51,6 @@ const QRScannerApp = () => {
     if (!qrData) return;
 
     try {
-      // Formato: EVENT:xxx|LEAD:xxx|TS:xxx|HASH:xxx|INVITADO:xxx
       const parts = qrData.split('|').reduce((acc, part) => {
         const [key, value] = part.split(':');
         acc[key] = value;
@@ -97,11 +101,8 @@ const QRScannerApp = () => {
       }));
     }
 
-    // Caracoles de mono
-    // Detenemos el escáner un momento para mostrar los datos
     setScanning(false);
 
-    // Auto-reiniciar después de 3 segundos
     setTimeout(() => {
       setLastScan(null);
       setScanning(true);
@@ -153,12 +154,11 @@ const QRScannerApp = () => {
     localStorage.setItem('pendingScans', JSON.stringify(remaining));
   };
 
-  // Handler que recibe los resultados del Scanner
   const handleScan = (results) => {
     if (!results || results.length === 0) return;
 
     const first = results[0];
-    const raw = first.rawValue; // texto del QR
+    const raw = first.rawValue;
 
     if (raw) {
       processQRCode(raw);
@@ -166,93 +166,114 @@ const QRScannerApp = () => {
   };
 
   const handleError = (error) => {
-    // Opcional: loguear errores de cámara/permiso
     console.error(error);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 text-white">
-      {/* Header */}
-      <div className="bg-blue-950 bg-opacity-50 backdrop-blur-sm border-b border-blue-700 p-4">
-        <div className="flex items-center justify-between max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold">Eventos VEQ</h1>
-          <div className="flex items-center gap-4">
-            {isOnline ? (
-              <Wifi className="w-5 h-5 text-green-400" />
-            ) : (
-              <div className="flex items-center gap-2 text-yellow-400">
-                <WifiOff className="w-5 h-5" />
-                <span className="text-sm">Offline</span>
+    <div className="qr-app">
+      {/* HEADER */}
+      <header className="qr-header">
+        <div className="qr-header-inner">
+          <div>
+            <div className="qr-header-title">Eventos VEQ</div>
+            <div className="qr-header-subtitle">
+              Registro de asistentes por código QR
+            </div>
+          </div>
+
+          <div
+            className={
+              'status-badge ' + (isOnline ? 'online' : 'offline')
+            }
+          >
+            {isOnline ? <Wifi /> : <WifiOff />}
+            {isOnline ? 'En línea' : 'Modo offline'}
+          </div>
+        </div>
+      </header>
+
+      {/* CONTENIDO PRINCIPAL */}
+      <main className="qr-main">
+        {/* STATS */}
+        <section className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-card-header">
+              <div className="stat-label">
+                <Users />
+                <span>Total escaneos</span>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-4xl mx-auto p-4 space-y-6">
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-4 border border-white border-opacity-20">
-            <div className="flex items-center gap-2 mb-2">
-              <Users className="w-5 h-5 text-blue-300" />
-              <span className="text-sm text-blue-200">Total</span>
             </div>
-            <div className="text-3xl font-bold">{stats.total}</div>
+            <div className="stat-value">{stats.total}</div>
           </div>
 
-          <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-4 border border-white border-opacity-20">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle className="w-5 h-5 text-green-400" />
-              <span className="text-sm text-green-200">Exitosos</span>
+          <div className="stat-card success">
+            <div className="stat-card-header">
+              <div className="stat-label">
+                <CheckCircle />
+                <span>Exitosos</span>
+              </div>
             </div>
-            <div className="text-3xl font-bold text-green-400">
-              {stats.successful}
-            </div>
+            <div className="stat-value">{stats.successful}</div>
           </div>
 
-          <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-4 border border-white border-opacity-20">
-            <div className="flex items-center gap-2 mb-2">
-              <XCircle className="w-5 h-5 text-red-400" />
-              <span className="text-sm text-red-200">Fallidos</span>
+          <div className="stat-card error">
+            <div className="stat-card-header">
+              <div className="stat-label">
+                <XCircle />
+                <span>Fallidos</span>
+              </div>
             </div>
-            <div className="text-3xl font-bold text-red-400">
-              {stats.failed}
-            </div>
+            <div className="stat-value">{stats.failed}</div>
           </div>
-        </div>
+        </section>
 
-        {/* Pending Scans */}
+        {/* PENDIENTES OFFLINE */}
         {pendingScans.length > 0 && (
-          <div className="bg-yellow-500 bg-opacity-20 border border-yellow-500 rounded-lg p-4">
-            <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5" />
-              <span>{pendingScans.length} escaneos pendientes de sincronizar</span>
+          <section className="pending-box">
+            <Clock />
+            <div>
+              <div>
+                {pendingScans.length} escaneos pendientes de sincronizar
+              </div>
+              <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
+                Cuando vuelva la conexión se enviarán automáticamente.
+              </div>
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Camera View */}
-        <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg overflow-hidden border border-white border-opacity-20">
+        {/* SCANNER / RESULTADO */}
+        <section className="scanner-card">
+          {/* Estado inicial */}
           {!scanning && !lastScan && (
-            <div className="aspect-video flex items-center justify-center bg-blue-950 bg-opacity-50">
+            <div className="scanner-idle">
+              <div className="scanner-idle-icon">
+                <Camera />
+              </div>
+              <div className="scanner-idle-title">
+                Listo para escanear códigos QR
+              </div>
+              <div className="scanner-idle-text">
+                Cuando estés frente al código, inicia la cámara y
+                colócalo dentro del recuadro luminoso.
+              </div>
               <button
+                className="primary-btn"
                 onClick={() => setScanning(true)}
-                className="flex flex-col items-center gap-4 p-8 hover:bg-white hover:bg-opacity-10 rounded-lg transition"
               >
-                <Camera className="w-16 h-16" />
-                <span className="text-xl font-semibold">Iniciar Escaneo</span>
+                <Camera />
+                Iniciar escaneo
               </button>
             </div>
           )}
 
-          {scanning && (
-            <div className="relative aspect-video bg-black">
+          {/* Escaneando */}
+          {scanning && !lastScan && (
+            <div className="scanner-live">
               <Scanner
                 onScan={handleScan}
                 onError={handleError}
-                // Solo QR, para tu caso
                 formats={['qr_code']}
-                // usar cámara trasera cuando se pueda
                 constraints={{ facingMode: 'environment' }}
                 styles={{
                   container: { width: '100%', height: '100%' },
@@ -264,57 +285,68 @@ const QRScannerApp = () => {
                 }}
               />
 
-              {/* Overlay de escaneo */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-64 h-64 border-4 border-blue-400 rounded-lg animate-pulse"></div>
+              <div className="scan-frame">
+                <div className="scan-frame-box" />
               </div>
 
               <button
+                className="stop-btn"
                 onClick={() => setScanning(false)}
-                className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 px-4 py-2 rounded-lg font-semibold"
               >
+                <XCircle />
                 Detener
               </button>
             </div>
           )}
 
+          {/* Resultado último escaneo */}
           {lastScan && (
             <div
-              className={`aspect-video flex items-center justify-center ${
-                lastScan.success ? 'bg-green-900' : 'bg-red-900'
-              }`}
+              className={
+                'scan-result ' +
+                (lastScan.success ? 'success' : 'error')
+              }
             >
-              <div className="text-center p-8">
-                {lastScan.success ? (
-                  <CheckCircle className="w-24 h-24 mx-auto mb-4 text-green-400" />
-                ) : (
-                  <XCircle className="w-24 h-24 mx-auto mb-4 text-red-400" />
-                )}
-                <h2 className="text-2xl font-bold mb-2">
-                  {lastScan.success ? '¡Registro Exitoso!' : 'Error'}
-                </h2>
-                <p className="text-lg opacity-90">{lastScan.message}</p>
+              <div className="scan-result-inner">
+                <div className="scan-result-icon">
+                  {lastScan.success ? <CheckCircle /> : <XCircle />}
+                </div>
+                <div className="scan-result-title">
+                  {lastScan.success ? '¡Registro exitoso!' : 'Error'}
+                </div>
+                <div className="scan-result-message">
+                  {lastScan.message}
+                </div>
                 {lastScan.data?.nombre && (
-                  <p className="text-xl font-semibold mt-4">
+                  <div className="scan-result-name">
                     {lastScan.data.nombre}
-                  </p>
+                  </div>
                 )}
+                <div className="scan-result-hint">
+                  Preparando el siguiente escaneo...
+                </div>
               </div>
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Instrucciones */}
-        <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-6 border border-white border-opacity-20">
-          <h3 className="text-lg font-semibold mb-3">Instrucciones:</h3>
-          <ul className="space-y-2 text-blue-100">
-            <li>• Presiona "Iniciar Escaneo" para activar la cámara</li>
-            <li>• Coloca el código QR dentro del marco</li>
-            <li>• El sistema registrará automáticamente la asistencia</li>
-            <li>• Funciona sin conexión - sincroniza cuando haya internet</li>
+        {/* INSTRUCCIONES */}
+        <section className="instructions-card">
+          <div className="instructions-title">Instrucciones de uso</div>
+          <ul className="instructions-list">
+            <li>
+              • Presiona <strong>"Iniciar escaneo"</strong> para activar la
+              cámara.
+            </li>
+            <li>• Coloca el código QR dentro del marco luminoso.</li>
+            <li>• El sistema registrará la asistencia automáticamente.</li>
+            <li>
+              • Si no hay internet, el registro se guarda y se sincroniza
+              cuando vuelva la conexión.
+            </li>
           </ul>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 };
