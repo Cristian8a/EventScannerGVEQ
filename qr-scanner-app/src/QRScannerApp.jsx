@@ -97,6 +97,7 @@ const QRScannerApp = () => {
       }));
     }
 
+    // Caracoles de mono
     // Detenemos el escáner un momento para mostrar los datos
     setScanning(false);
 
