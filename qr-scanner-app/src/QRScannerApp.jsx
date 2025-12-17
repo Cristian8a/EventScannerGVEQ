@@ -8,6 +8,8 @@ import {
   Clock,
   Wifi,
   WifiOff,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import './QRScannerApp.css';
 
@@ -21,6 +23,28 @@ const QRScannerApp = () => {
   const [pendingScans, setPendingScans] = useState([]);
 
   const WEBHOOK_URL = 'https://starknbn.ddns.net/webhook/scan-qr';
+
+  // ✅ TEMA (claro/oscuro) + persistencia
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved;
+
+    const prefersDark =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    return prefersDark ? 'dark' : 'light';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+    // opcional: set en <html> por si luego quieres estilos globales
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () =>
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -170,7 +194,7 @@ const QRScannerApp = () => {
   };
 
   return (
-    <div className="qr-app">
+    <div className={`qr-app ${theme === 'dark' ? 'theme-dark' : 'theme-light'}`}>
       {/* HEADER */}
       <header className="qr-header">
         <div className="qr-header-inner">
@@ -181,13 +205,17 @@ const QRScannerApp = () => {
             </div>
           </div>
 
-          <div
-            className={
-              'status-badge ' + (isOnline ? 'online' : 'offline')
-            }
-          >
-            {isOnline ? <Wifi /> : <WifiOff />}
-            {isOnline ? 'En línea' : 'Modo offline'}
+          {/* derecha: status + toggle tema */}
+          <div className="header-actions">
+            <div className={'status-badge ' + (isOnline ? 'online' : 'offline')}>
+              {isOnline ? <Wifi /> : <WifiOff />}
+              {isOnline ? 'En línea' : 'Modo offline'}
+            </div>
+
+            <button className="theme-toggle" onClick={toggleTheme} type="button">
+              {theme === 'dark' ? <Sun /> : <Moon />}
+              {theme === 'dark' ? 'Claro' : 'Oscuro'}
+            </button>
           </div>
         </div>
       </header>
@@ -232,9 +260,7 @@ const QRScannerApp = () => {
           <section className="pending-box">
             <Clock />
             <div>
-              <div>
-                {pendingScans.length} escaneos pendientes de sincronizar
-              </div>
+              <div>{pendingScans.length} escaneos pendientes de sincronizar</div>
               <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
                 Cuando vuelva la conexión se enviarán automáticamente.
               </div>
@@ -250,17 +276,12 @@ const QRScannerApp = () => {
               <div className="scanner-idle-icon">
                 <Camera />
               </div>
-              <div className="scanner-idle-title">
-                Listo para escanear códigos QR
-              </div>
+              <div className="scanner-idle-title">Listo para escanear códigos QR</div>
               <div className="scanner-idle-text">
-                Cuando estés frente al código, inicia la cámara y
-                colócalo dentro del recuadro luminoso.
+                Cuando estés frente al código, inicia la cámara y colócalo dentro del
+                recuadro luminoso.
               </div>
-              <button
-                className="primary-btn"
-                onClick={() => setScanning(true)}
-              >
+              <button className="primary-btn" onClick={() => setScanning(true)}>
                 <Camera />
                 Iniciar escaneo
               </button>
@@ -289,10 +310,7 @@ const QRScannerApp = () => {
                 <div className="scan-frame-box" />
               </div>
 
-              <button
-                className="stop-btn"
-                onClick={() => setScanning(false)}
-              >
+              <button className="stop-btn" onClick={() => setScanning(false)}>
                 <XCircle />
                 Detener
               </button>
@@ -301,12 +319,7 @@ const QRScannerApp = () => {
 
           {/* Resultado último escaneo */}
           {lastScan && (
-            <div
-              className={
-                'scan-result ' +
-                (lastScan.success ? 'success' : 'error')
-              }
-            >
+            <div className={'scan-result ' + (lastScan.success ? 'success' : 'error')}>
               <div className="scan-result-inner">
                 <div className="scan-result-icon">
                   {lastScan.success ? <CheckCircle /> : <XCircle />}
@@ -314,17 +327,11 @@ const QRScannerApp = () => {
                 <div className="scan-result-title">
                   {lastScan.success ? '¡Registro exitoso!' : 'Error'}
                 </div>
-                <div className="scan-result-message">
-                  {lastScan.message}
-                </div>
+                <div className="scan-result-message">{lastScan.message}</div>
                 {lastScan.data?.nombre && (
-                  <div className="scan-result-name">
-                    {lastScan.data.nombre}
-                  </div>
+                  <div className="scan-result-name">{lastScan.data.nombre}</div>
                 )}
-                <div className="scan-result-hint">
-                  Preparando el siguiente escaneo...
-                </div>
+                <div className="scan-result-hint">Preparando el siguiente escaneo...</div>
               </div>
             </div>
           )}
@@ -335,14 +342,13 @@ const QRScannerApp = () => {
           <div className="instructions-title">Instrucciones de uso</div>
           <ul className="instructions-list">
             <li>
-              • Presiona <strong>"Iniciar escaneo"</strong> para activar la
-              cámara.
+              • Presiona <strong>"Iniciar escaneo"</strong> para activar la cámara.
             </li>
             <li>• Coloca el código QR dentro del marco luminoso.</li>
             <li>• El sistema registrará la asistencia automáticamente.</li>
             <li>
-              • Si no hay internet, el registro se guarda y se sincroniza
-              cuando vuelva la conexión.
+              • Si no hay internet, el registro se guarda y se sincroniza cuando vuelva la
+              conexión.
             </li>
           </ul>
         </section>
