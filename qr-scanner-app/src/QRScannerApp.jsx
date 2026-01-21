@@ -22,7 +22,7 @@ const QRScannerApp = () => {
   );
   const [pendingScans, setPendingScans] = useState([]);
 
-  const WEBHOOK_URL = 'https://starknbn.ddns.net/webhook/scan-qr';
+  const WEBHOOK_URL = 'https://n8n.srv1286386.hstgr.cloud/webhook/scan-qr';
 
   // ✅ TEMA (claro/oscuro) + persistencia
   const [theme, setTheme] = useState(() => {
