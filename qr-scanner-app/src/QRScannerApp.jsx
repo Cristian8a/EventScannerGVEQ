@@ -10,6 +10,7 @@ import {
   WifiOff,
   Sun,
   Moon,
+  UserPlus,
 } from 'lucide-react';
 import './QRScannerApp.css';
 
@@ -22,7 +23,27 @@ const QRScannerApp = () => {
   );
   const [pendingScans, setPendingScans] = useState([]);
 
+  // ✅ NUEVO: invitado actual mostrado arriba del scanner
+  const [currentGuest, setCurrentGuest] = useState(null);
+
   const WEBHOOK_URL = 'https://n8n.srv1286386.hstgr.cloud/webhook/scan-qr';
+
+  // ✅ NUEVO: webhook para registrar cliente (lo creas en n8n)
+  const REGISTER_WEBHOOK_URL =
+    'https://n8n.srv1286386.hstgr.cloud/webhook/registrar-cliente';
+
+  // ✅ NUEVO: modal + form
+  const [showRegister, setShowRegister] = useState(false);
+  const [registerLoading, setRegisterLoading] = useState(false);
+  const [registerError, setRegisterError] = useState(null);
+  const [registerSuccess, setRegisterSuccess] = useState(null);
+  const [registerForm, setRegisterForm] = useState({
+    nombre: '',
+    apellido: '',
+    telefono: '',
+    email: '',
+    eventoVentas: '',
+  });
 
   // ✅ TEMA (claro/oscuro) + persistencia
   const [theme, setTheme] = useState(() => {
@@ -39,7 +60,6 @@ const QRScannerApp = () => {
 
   useEffect(() => {
     localStorage.setItem('theme', theme);
-    // opcional: set en <html> por si luego quieres estilos globales
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
@@ -54,9 +74,7 @@ const QRScannerApp = () => {
     window.addEventListener('offline', handleOffline);
 
     const saved = localStorage.getItem('pendingScans');
-    if (saved) {
-      setPendingScans(JSON.parse(saved));
-    }
+    if (saved) setPendingScans(JSON.parse(saved));
 
     return () => {
       window.removeEventListener('online', handleOnline);
@@ -65,11 +83,26 @@ const QRScannerApp = () => {
   }, []);
 
   useEffect(() => {
-    if (isOnline && pendingScans.length > 0) {
-      syncPendingScans();
-    }
+    if (isOnline && pendingScans.length > 0) syncPendingScans();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
+
+  const normalizePhoneMX = (phoneRaw) => {
+    if (!phoneRaw) return '';
+    const trimmed = String(phoneRaw).trim();
+    const digits = trimmed.replace(/[^\d+]/g, '');
+    // respeta +1
+    if (digits.startsWith('+1')) return digits;
+    // si ya viene con +52
+    if (digits.startsWith('+52')) return digits;
+    // si viene 52...
+    if (digits.startsWith('52')) return `+${digits}`;
+    // si viene 10 dígitos mx
+    const onlyDigits = trimmed.replace(/\D/g, '');
+    if (onlyDigits.length === 10) return `+52${onlyDigits}`;
+    // fallback
+    return trimmed.startsWith('+') ? trimmed : `+${trimmed}`;
+  };
 
   const processQRCode = async (qrData) => {
     if (!qrData) return;
@@ -96,6 +129,12 @@ const QRScannerApp = () => {
         const pending = [...pendingScans, scanData];
         setPendingScans(pending);
         localStorage.setItem('pendingScans', JSON.stringify(pending));
+
+        // ⚠️ Offline: no puedes saber nombre/email, porque vienen de SF via n8n.
+        setCurrentGuest({
+          nombre: 'Sin datos (offline)',
+          email: 'Se mostrará al sincronizar',
+        });
 
         setLastScan({
           success: true,
@@ -136,15 +175,25 @@ const QRScannerApp = () => {
   const sendToWebhook = async (scanData) => {
     const response = await fetch(WEBHOOK_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(scanData),
     });
 
     const result = await response.json();
 
     if (response.ok) {
+      // ✅ AQUI guardamos invitado en banner superior
+      // Esperamos que n8n responda { nombre, email, message, ... }
+      if (result?.nombre || result?.email) {
+        setCurrentGuest({
+          nombre: result?.nombre || '—',
+          email: result?.email || '—',
+        });
+      } else {
+        // Si aún no lo devuelve n8n, lo dejas en null y solo verás el mensaje
+        setCurrentGuest(null);
+      }
+
       setLastScan({
         success: true,
         message: result.message || 'Asistencia registrada correctamente',
@@ -152,6 +201,7 @@ const QRScannerApp = () => {
         timestamp: Date.now(),
         data: result,
       });
+
       setStats((prev) => ({
         ...prev,
         total: prev.total + 1,
@@ -180,17 +230,62 @@ const QRScannerApp = () => {
 
   const handleScan = (results) => {
     if (!results || results.length === 0) return;
-
-    const first = results[0];
-    const raw = first.rawValue;
-
-    if (raw) {
-      processQRCode(raw);
-    }
+    const raw = results[0]?.rawValue;
+    if (raw) processQRCode(raw);
   };
 
-  const handleError = (error) => {
-    console.error(error);
+  const handleError = (error) => console.error(error);
+
+  // ✅ Form handlers
+  const onChangeRegister = (e) => {
+    const { name, value } = e.target;
+    setRegisterForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const submitRegister = async (e) => {
+    e.preventDefault();
+    setRegisterError(null);
+    setRegisterSuccess(null);
+
+    const payload = {
+      nombre: registerForm.nombre?.trim(),
+      apellido: registerForm.apellido?.trim(),
+      telefono: normalizePhoneMX(registerForm.telefono),
+      email: registerForm.email?.trim(),
+      eventoVentas: registerForm.eventoVentas?.trim(),
+      createdAt: new Date().toISOString(),
+      source: 'qr-scanner-app',
+    };
+
+    // validación mínima
+    if (!payload.nombre || !payload.apellido || !payload.telefono || !payload.email || !payload.eventoVentas) {
+      setRegisterError('Completa todos los campos.');
+      return;
+    }
+
+    if (!isOnline) {
+      setRegisterError('Necesitas conexión para registrar un cliente nuevo.');
+      return;
+    }
+
+    setRegisterLoading(true);
+    try {
+      const res = await fetch(REGISTER_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+
+      if (!res.ok) throw new Error(json?.error || 'No se pudo registrar');
+
+      setRegisterSuccess(json?.message || 'Cliente registrado correctamente');
+      setRegisterForm({ nombre: '', apellido: '', telefono: '', email: '', eventoVentas: '' });
+    } catch (err) {
+      setRegisterError(err.message || 'Error inesperado');
+    } finally {
+      setRegisterLoading(false);
+    }
   };
 
   return (
@@ -205,12 +300,25 @@ const QRScannerApp = () => {
             </div>
           </div>
 
-          {/* derecha: status + toggle tema */}
           <div className="header-actions">
             <div className={'status-badge ' + (isOnline ? 'online' : 'offline')}>
               {isOnline ? <Wifi /> : <WifiOff />}
               {isOnline ? 'En línea' : 'Modo offline'}
             </div>
+
+            {/* ✅ NUEVO: botón registrar cliente */}
+            <button
+              className="theme-toggle"
+              onClick={() => {
+                setRegisterError(null);
+                setRegisterSuccess(null);
+                setShowRegister(true);
+              }}
+              type="button"
+            >
+              <UserPlus />
+              Registrar cliente
+            </button>
 
             <button className="theme-toggle" onClick={toggleTheme} type="button">
               {theme === 'dark' ? <Sun /> : <Moon />}
@@ -220,7 +328,6 @@ const QRScannerApp = () => {
         </div>
       </header>
 
-      {/* CONTENIDO PRINCIPAL */}
       <main className="qr-main">
         {/* STATS */}
         <section className="stats-grid">
@@ -268,9 +375,17 @@ const QRScannerApp = () => {
           </section>
         )}
 
+        {/* ✅ NUEVO: Banner de invitado arriba del scanner */}
+        {currentGuest && (
+          <section className="guest-banner">
+            <div className="guest-banner-title">Invitado detectado</div>
+            <div className="guest-banner-name">{currentGuest.nombre}</div>
+            <div className="guest-banner-email">{currentGuest.email}</div>
+          </section>
+        )}
+
         {/* SCANNER / RESULTADO */}
         <section className="scanner-card">
-          {/* Estado inicial */}
           {!scanning && !lastScan && (
             <div className="scanner-idle">
               <div className="scanner-idle-icon">
@@ -288,7 +403,6 @@ const QRScannerApp = () => {
             </div>
           )}
 
-          {/* Escaneando */}
           {scanning && !lastScan && (
             <div className="scanner-live">
               <Scanner
@@ -298,11 +412,7 @@ const QRScannerApp = () => {
                 constraints={{ facingMode: 'environment' }}
                 styles={{
                   container: { width: '100%', height: '100%' },
-                  video: {
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                  },
+                  video: { width: '100%', height: '100%', objectFit: 'cover' },
                 }}
               />
 
@@ -317,7 +427,6 @@ const QRScannerApp = () => {
             </div>
           )}
 
-          {/* Resultado último escaneo */}
           {lastScan && (
             <div className={'scan-result ' + (lastScan.success ? 'success' : 'error')}>
               <div className="scan-result-inner">
@@ -328,9 +437,12 @@ const QRScannerApp = () => {
                   {lastScan.success ? '¡Registro exitoso!' : 'Error'}
                 </div>
                 <div className="scan-result-message">{lastScan.message}</div>
+
+                {/* (ya lo tenías) */}
                 {lastScan.data?.nombre && (
                   <div className="scan-result-name">{lastScan.data.nombre}</div>
                 )}
+
                 <div className="scan-result-hint">Preparando el siguiente escaneo...</div>
               </div>
             </div>
@@ -353,6 +465,89 @@ const QRScannerApp = () => {
           </ul>
         </section>
       </main>
+
+      {/* ✅ NUEVO: Modal registrar cliente */}
+      {showRegister && (
+        <div className="modal-backdrop" onClick={() => setShowRegister(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">Registrar cliente (básico)</div>
+            <div className="modal-subtitle">
+              Se enviará a n8n para seguir el flujo de registro.
+            </div>
+
+            <form className="register-form" onSubmit={submitRegister}>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Nombre</span>
+                  <input
+                    name="nombre"
+                    value={registerForm.nombre}
+                    onChange={onChangeRegister}
+                    placeholder="Ej. Juan"
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Apellido</span>
+                  <input
+                    name="apellido"
+                    value={registerForm.apellido}
+                    onChange={onChangeRegister}
+                    placeholder="Ej. Pérez"
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Teléfono</span>
+                  <input
+                    name="telefono"
+                    value={registerForm.telefono}
+                    onChange={onChangeRegister}
+                    placeholder="Ej. 3312345678"
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Correo electrónico</span>
+                  <input
+                    name="email"
+                    value={registerForm.email}
+                    onChange={onChangeRegister}
+                    placeholder="Ej. correo@dominio.com"
+                  />
+                </label>
+
+                <label className="form-field form-field-full">
+                  <span>Evento de ventas</span>
+                  <input
+                    name="eventoVentas"
+                    value={registerForm.eventoVentas}
+                    onChange={onChangeRegister}
+                    placeholder="Ej. EIE CSI / Open House / etc."
+                  />
+                </label>
+              </div>
+
+              {registerError && <div className="form-alert error">{registerError}</div>}
+              {registerSuccess && <div className="form-alert success">{registerSuccess}</div>}
+
+              <div className="modal-actions">
+                <button
+                  className="theme-toggle"
+                  type="button"
+                  onClick={() => setShowRegister(false)}
+                >
+                  Cancelar
+                </button>
+
+                <button className="primary-btn" type="submit" disabled={registerLoading}>
+                  {registerLoading ? 'Registrando...' : 'Guardar registro'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
