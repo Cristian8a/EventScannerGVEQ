@@ -26,7 +26,7 @@ const QRScannerApp = () => {
   // ✅ NUEVO: invitado actual mostrado arriba del scanner
   const [currentGuest, setCurrentGuest] = useState(null);
 
-  const WEBHOOK_URL = 'https://n8n.srv1286386.hstgr.cloud/webhook/scan-qr';
+  const WEBHOOK_URL = 'https://grupo-veq-n8n-grupo-veq.adsfsj.easypanel.host/webhook/scan-qr';
 
   // ✅ NUEVO: webhook para registrar cliente (lo creas en n8n)
   const REGISTER_WEBHOOK_URL =
