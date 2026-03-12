@@ -23,16 +23,16 @@ const QRScannerApp = () => {
   );
   const [pendingScans, setPendingScans] = useState([]);
 
-  // ✅ NUEVO: invitado actual mostrado arriba del scanner
+  // NUEVO: invitado actual mostrado arriba del scanner
   const [currentGuest, setCurrentGuest] = useState(null);
 
   const WEBHOOK_URL = 'https://grupo-veq-n8n-grupo-veq.adsfsj.easypanel.host/webhook/scan-qr';
 
-  // ✅ NUEVO: webhook para registrar cliente (lo creas en n8n)
+  // webhook para registrar cliente (lo creas en n8n)
   const REGISTER_WEBHOOK_URL =
     'https://n8n.srv1286386.hstgr.cloud/webhook/registrar-cliente';
 
-  // ✅ NUEVO: modal + form
+  // NUEVO: modal + form
   const [showRegister, setShowRegister] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerError, setRegisterError] = useState(null);
@@ -45,7 +45,7 @@ const QRScannerApp = () => {
     eventoVentas: '',
   });
 
-  // ✅ TEMA (claro/oscuro) + persistencia
+  // TEMA (claro/oscuro) + persistencia
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('theme');
     if (saved) return saved;
@@ -182,7 +182,7 @@ const QRScannerApp = () => {
     const result = await response.json();
 
     if (response.ok) {
-      // ✅ AQUI guardamos invitado en banner superior
+      // AQUI guardamos invitado en banner superior
       // Esperamos que n8n responda { nombre, email, message, ... }
       if (result?.nombre || result?.email) {
         setCurrentGuest({
@@ -209,6 +209,7 @@ const QRScannerApp = () => {
       }));
     } else {
       throw new Error(result.error || 'Error al registrar asistencia');
+      console.error('Error response from webhook:', result);
     }
   };
 
@@ -236,7 +237,7 @@ const QRScannerApp = () => {
 
   const handleError = (error) => console.error(error);
 
-  // ✅ Form handlers
+  // Form handlers
   const onChangeRegister = (e) => {
     const { name, value } = e.target;
     setRegisterForm((prev) => ({ ...prev, [name]: value }));
@@ -285,6 +286,7 @@ const QRScannerApp = () => {
       setRegisterError(err.message || 'Error inesperado');
     } finally {
       setRegisterLoading(false);
+      console.log('Registro cliente payload:', payload);
     }
   };
 
@@ -306,7 +308,7 @@ const QRScannerApp = () => {
               {isOnline ? 'En línea' : 'Modo offline'}
             </div>
 
-            {/* ✅ NUEVO: botón registrar cliente */}
+            {/* NUEVO: botón registrar cliente */}
             <button
               className="theme-toggle"
               onClick={() => {
@@ -375,7 +377,7 @@ const QRScannerApp = () => {
           </section>
         )}
 
-        {/* ✅ NUEVO: Banner de invitado arriba del scanner */}
+        {/* NUEVO: Banner de invitado arriba del scanner */}
         {currentGuest && (
           <section className="guest-banner">
             <div className="guest-banner-title">Invitado detectado</div>
@@ -466,7 +468,7 @@ const QRScannerApp = () => {
         </section>
       </main>
 
-      {/* ✅ NUEVO: Modal registrar cliente */}
+      {/* NUEVO: Modal registrar cliente */}
       {showRegister && (
         <div className="modal-backdrop" onClick={() => setShowRegister(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
