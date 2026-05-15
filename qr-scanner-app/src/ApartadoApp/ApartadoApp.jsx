@@ -1,68 +1,83 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Building2, CheckCircle, Wifi, WifiOff, Sun, Moon, ArrowLeft,
-  AlertTriangle, Loader2, DollarSign, Home, Hash, Users,
-  TrendingUp, FileCheck, Search, ChevronDown, X, RefreshCw,
+  Building2,
+  CheckCircle,
+  XCircle,
+  Wifi,
+  WifiOff,
+  Sun,
+  Moon,
+  ArrowLeft,
+  AlertTriangle,
+  Loader2,
+  DollarSign,
+  Home,
+  Hash,
+  Users,
+  TrendingUp,
+  FileCheck,
 } from 'lucide-react';
 import './ApartadoApp.css';
 
-// ─── CONFIG ───────────────────────────────────────────────────────────────────
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+// Cambia estas URLs por las de tu instancia n8n
 const API_BASE = 'https://grupo-veq-n8n-grupo-veq.adsfsj.easypanel.host/webhook';
 const ENDPOINTS = {
-  catalogo: `${API_BASE}/apartado/catalogo`,
-  verificar: `${API_BASE}/apartado/verificar`,
-  confirmar: `${API_BASE}/apartado/confirmar`,
+  catalogo: `${API_BASE}/apartado/catalogo`,        // GET inventario disponible
+  verificar: `${API_BASE}/apartado/verificar`,       // POST verificar disponibilidad
+  confirmar: `${API_BASE}/apartado/confirmar`,       // POST registrar apartado
+  contador: `${API_BASE}/apartado/contador`,        // GET contador del evento
 };
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
 const fmt = (n) =>
-  new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(Number(n) || 0);
+  new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n);
 
 const parseUrlParams = () => {
-  const p = new URLSearchParams(window.location.search);
+  const params = new URLSearchParams(window.location.search);
   return {
-    invitadoId: p.get('invitadoId') || p.get('invitado') || null,
-    oppId: p.get('oppId') || p.get('opp') || null,
-    token: p.get('token') || null,
-    eventId: p.get('eventId') || p.get('evento') || null,
+    invitadoId: params.get('invitadoId') || params.get('invitado') || null,
+    oppId: params.get('oppId') || params.get('opp') || null,
+    token: params.get('token') || null,
+    eventId: params.get('eventId') || params.get('evento') || null,
   };
 };
 
-// ─── COMPONENT ────────────────────────────────────────────────────────────────
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 const ApartadoApp = () => {
+  // Contexto de URL
   const [urlParams] = useState(parseUrlParams);
+
+  // Pantalla activa: 'catalogo' | 'formulario' | 'confirmado' | 'error'
   const [screen, setScreen] = useState('catalogo');
 
-  // Datos reales de SF vía n8n
+  // Datos
   const [inventario, setInventario] = useState([]);
-  const [proyectos, setProyectos] = useState([]);
-  const [contexto, setContexto] = useState(null);
-  const [contador, setContador] = useState(null);
   const [unidadSel, setUnidadSel] = useState(null);
-  const [operacion, setOperacion] = useState(null);
-
-  // Dropdown
-  const [proyectoSel, setProyectoSel] = useState(null);
-  const [dropdownQuery, setDropdownQuery] = useState('');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef(null);
+  const [contexto, setContexto] = useState(null); // { asesor, invitado, evento }
+  const [operacion, setOperacion] = useState(null); // resultado del apartado
+  const [contador, setContador] = useState(null); // { apartados, umbral, precio_actual }
 
   // Formulario
   const [form, setForm] = useState({
-    precioVenta: '', montoApartado: '',
-    enganche: '', financiamiento: '', entrega: '',
-    mensualidades: '', fechaMensualidad: '',
+    precioVenta: '',
+    montoApartado: '',
+    enganche: '',
+    financiamiento: '',
+    entrega: '',
+    mensualidades: '',
+    fechaMensualidad: '',
   });
 
-  // UI
+  // UI state
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [theme, setTheme] = useState(() => localStorage.getItem('veq-theme') || 'light');
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
 
   useEffect(() => {
-    localStorage.setItem('veq-theme', theme);
+    localStorage.setItem('theme', theme);
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
@@ -74,16 +89,7 @@ const ApartadoApp = () => {
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
   }, []);
 
-  useEffect(() => {
-    const handler = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target))
-        setDropdownOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  // ── Cargar catálogo desde n8n → SF ─────────────────────────────────────────
+  // ── Cargar catálogo e info de contexto ──
   const cargarCatalogo = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -98,40 +104,17 @@ const ApartadoApp = () => {
           eventId: urlParams.eventId,
         }),
       });
-
-      if (!res.ok) throw new Error(`El servidor respondió con error ${res.status}`);
-
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const unidades = data.unidades || [];
 
-      // Derivar proyectos únicos si n8n no los manda separados
-      let proyectosArr = data.proyectos || [];
-      if (proyectosArr.length === 0 && unidades.length > 0) {
-        const map = {};
-        for (const u of unidades) {
-          if (u.proyectoId && !map[u.proyectoId])
-            map[u.proyectoId] = { id: u.proyectoId, nombre: u.proyectoNombre || u.proyectoId };
-        }
-        proyectosArr = Object.values(map).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-      }
-
-      setInventario(unidades);
-      setProyectos(proyectosArr);
+      // Esperamos: { unidades: [...], contexto: { asesor, invitado, evento }, contador: {...} }
+      setInventario(data.unidades || []);
       setContexto(data.contexto || null);
       setContador(data.contador || null);
 
+      // Pre-cargar precio de la primera unidad si quieres
     } catch (err) {
-      // Mensaje de error claro según el tipo de fallo
-      if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
-        setError(
-          'No se pudo conectar con el servidor. Verifica que:\n' +
-          '1. El workflow en n8n esté activo (toggle "Active" en azul)\n' +
-          '2. El webhook /apartado/catalogo esté en modo Production\n' +
-          '3. No haya bloqueo de CORS en n8n (habilita "Allow OPTIONS method" en el nodo webhook)'
-        );
-      } else {
-        setError(`Error al cargar el inventario: ${err.message}`);
-      }
+      setError('No se pudo cargar el inventario. ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -139,41 +122,51 @@ const ApartadoApp = () => {
 
   useEffect(() => { cargarCatalogo(); }, [cargarCatalogo]);
 
-  // ── Derived: filtrado ────────────────────────────────────────────────────────
-  const opcionesDropdown = proyectos.filter((p) =>
-    p.nombre.toLowerCase().includes(dropdownQuery.toLowerCase())
-  );
-  const inventarioFiltrado = proyectoSel
-    ? inventario.filter((u) => u.proyectoId === proyectoSel.id)
-    : inventario;
-
-  const limpiarFiltro = () => { setProyectoSel(null); setDropdownQuery(''); setDropdownOpen(false); };
-
-  // ── Formulario ───────────────────────────────────────────────────────────────
-  const seleccionarUnidad = (u) => {
-    setUnidadSel(u);
-    setForm({
-      precioVenta: String(u.precio || ''), montoApartado: String(u.montoApartado || ''),
-      enganche: '', financiamiento: '', entrega: '', mensualidades: '', fechaMensualidad: '',
-    });
+  // ── Seleccionar unidad → ir a formulario ──
+  const seleccionarUnidad = (unidad) => {
+    setUnidadSel(unidad);
+    setForm((prev) => ({
+      ...prev,
+      precioVenta: String(unidad.precio || ''),
+      montoApartado: String(unidad.montoApartado || ''),
+      enganche: '',
+      financiamiento: '',
+      entrega: '',
+      mensualidades: '',
+      fechaMensualidad: '',
+    }));
     setScreen('formulario');
     setError(null);
   };
 
-  const totalEsquema = () => (Number(form.enganche) || 0) + (Number(form.financiamiento) || 0) + (Number(form.entrega) || 0);
+  // ── Validar suma esquema de pago ──
+  const totalEsquema = () => {
+    const e = Number(form.enganche) || 0;
+    const f = Number(form.financiamiento) || 0;
+    const d = Number(form.entrega) || 0;
+    return e + f + d;
+  };
+
   const esquemaValido = () => totalEsquema() === 100;
 
-  // ── Confirmar apartado ───────────────────────────────────────────────────────
+  // ── Confirmar apartado ──
   const confirmarApartado = async () => {
-    if (!esquemaValido()) { setError('La suma de Enganche + Financiamiento + Entrega debe ser exactamente 100%.'); return; }
+    if (!esquemaValido()) {
+      setError('La suma de Enganche + Financiamiento + Entrega debe ser exactamente 100%.');
+      return;
+    }
     setSubmitting(true);
     setError(null);
 
     const payload = {
-      invitadoId: urlParams.invitadoId, oppId: urlParams.oppId,
-      token: urlParams.token, eventId: urlParams.eventId,
-      unidadId: unidadSel.id, unidadNombre: unidadSel.nombre,
-      precioVenta: Number(form.precioVenta), montoApartado: Number(form.montoApartado),
+      invitadoId: urlParams.invitadoId,
+      oppId: urlParams.oppId,
+      token: urlParams.token,
+      eventId: urlParams.eventId,
+      unidadId: unidadSel.id,
+      unidadNombre: unidadSel.nombre,
+      precioVenta: Number(form.precioVenta),
+      montoApartado: Number(form.montoApartado),
       esquemaPago: {
         enganche: Number(form.enganche),
         financiamiento: Number(form.financiamiento),
@@ -185,7 +178,7 @@ const ApartadoApp = () => {
     };
 
     try {
-      // 1. Anti-colisión
+      // 1. Verificar disponibilidad anti-colisión
       const verRes = await fetch(ENDPOINTS.verificar, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -200,14 +193,14 @@ const ApartadoApp = () => {
         return;
       }
 
-      // 2. Confirmar en SF
+      // 2. Registrar apartado
       const confRes = await fetch(ENDPOINTS.confirmar, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const confData = await confRes.json();
-      if (!confRes.ok) throw new Error(confData.error || `Error ${confRes.status}`);
+      if (!confRes.ok) throw new Error(confData.error || 'Error al confirmar');
 
       setOperacion(confData);
       setContador(confData.contador || contador);
@@ -221,7 +214,9 @@ const ApartadoApp = () => {
 
   const toggleTheme = () => setTheme((p) => (p === 'dark' ? 'light' : 'dark'));
 
-  // ─── RENDER ───────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className={`apt-app ${theme === 'dark' ? 'theme-dark' : 'theme-light'}`}>
 
@@ -239,6 +234,7 @@ const ApartadoApp = () => {
               <div className="apt-header-subtitle">Confirma tu apartado y esquema de pago</div>
             </div>
           </div>
+
           <div className="apt-header-actions">
             <div className={`apt-status-badge ${isOnline ? 'online' : 'offline'}`}>
               {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
@@ -250,128 +246,78 @@ const ApartadoApp = () => {
             </button>
           </div>
         </div>
+
+        {/* Tarjetas de contexto */}
         {contexto && (
           <div className="apt-context-bar">
-            <div className="apt-ctx-chip"><Users size={14} /> Asesor: <strong>{contexto.asesor || '—'}</strong></div>
-            <div className="apt-ctx-chip"><Users size={14} /> Invitado: <strong>{contexto.invitado || '—'}</strong></div>
-            <div className="apt-ctx-chip confirmed"><CheckCircle size={14} /> Estado: <strong>Confirmado (Asistió)</strong></div>
+            <div className="apt-ctx-chip">
+              <Users size={14} /> Asesor: <strong>{contexto.asesor || '—'}</strong>
+            </div>
+            <div className="apt-ctx-chip">
+              <Users size={14} /> Invitado: <strong>{contexto.invitado || '—'}</strong>
+            </div>
+            <div className="apt-ctx-chip confirmed">
+              <CheckCircle size={14} /> Estado: <strong>Confirmado (Asistió)</strong>
+            </div>
           </div>
         )}
       </header>
 
       <main className="apt-main">
 
-        {/* Contador del evento */}
+        {/* ── CONTADOR DEL EVENTO ── */}
         {contador && (
           <section className="apt-counter-bar">
-            <div className="apt-counter-item"><Hash size={14} /> Apartados: <strong>{contador.apartados}</strong></div>
-            <div className="apt-counter-item"><TrendingUp size={14} /> Umbral: <strong>{contador.umbral}</strong></div>
-            <div className="apt-counter-item price"><DollarSign size={14} /> Precio Vigente: <strong>{fmt(contador.precioActual)}</strong></div>
+            <div className="apt-counter-item">
+              <Hash size={14} /> Apartados: <strong>{contador.apartados}</strong>
+            </div>
+            <div className="apt-counter-item">
+              <TrendingUp size={14} /> Umbral: <strong>{contador.umbral}</strong>
+            </div>
+            <div className="apt-counter-item price">
+              <DollarSign size={14} /> Precio Vigente: <strong>{fmt(contador.precioActual)}</strong>
+            </div>
             {contador.apartados >= contador.umbral && (
-              <div className="apt-counter-alert"><TrendingUp size={14} /> ¡Umbral alcanzado! Precios actualizados</div>
+              <div className="apt-counter-alert">
+                <TrendingUp size={14} /> ¡Umbral alcanzado! Precios actualizados
+              </div>
             )}
           </section>
         )}
 
-        {/* Loading */}
+        {/* ── LOADING ── */}
         {loading && (
           <div className="apt-center">
             <Loader2 className="apt-spinner" size={32} />
-            <p>Cargando inventario desde Salesforce...</p>
+            <p>Cargando inventario...</p>
           </div>
         )}
 
-        {/* Error con botón de reintento */}
+        {/* ── ERROR GLOBAL ── */}
         {error && !loading && (
-          <div className="apt-error-block">
-            <AlertTriangle size={22} />
-            <div className="apt-error-text">
-              {error.split('\n').map((line, i) => <p key={i}>{line}</p>)}
-            </div>
-            <button className="apt-retry-btn" onClick={cargarCatalogo}>
-              <RefreshCw size={15} /> Reintentar
-            </button>
+          <div className="apt-alert error">
+            <AlertTriangle size={16} /> {error}
           </div>
         )}
 
-        {/* ══ PANTALLA 1: CATÁLOGO ══ */}
-        {!loading && !error && screen === 'catalogo' && (
+        {/* ══════════════════════════════════════════
+            PANTALLA 1: CATÁLOGO DE UNIDADES
+        ══════════════════════════════════════════ */}
+        {!loading && screen === 'catalogo' && (
           <section className="apt-catalogo">
-
-            <div className="apt-catalogo-header">
-              <div className="apt-section-title">
-                <Building2 size={20} /> Inventario Disponible
-                <span className="apt-catalogo-count">
-                  {inventarioFiltrado.length} unidad{inventarioFiltrado.length !== 1 ? 'es' : ''}
-                </span>
-              </div>
-
-              {/* Dropdown de proyecto — solo aparece si hay proyectos */}
-              {proyectos.length > 0 && (
-                <div className="apt-proyecto-dropdown" ref={dropdownRef}>
-                  <div
-                    className={`apt-dropdown-trigger ${dropdownOpen ? 'open' : ''} ${proyectoSel ? 'has-value' : ''}`}
-                    onClick={() => setDropdownOpen((v) => !v)}
-                  >
-                    <Search size={15} className="apt-dropdown-icon-left" />
-                    <input
-                      className="apt-dropdown-input"
-                      placeholder="Filtrar por proyecto..."
-                      value={proyectoSel ? proyectoSel.nombre : dropdownQuery}
-                      onChange={(e) => { setDropdownQuery(e.target.value); setProyectoSel(null); setDropdownOpen(true); }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDropdownOpen(true);
-                        if (proyectoSel) { setDropdownQuery(''); setProyectoSel(null); }
-                      }}
-                    />
-                    {proyectoSel
-                      ? <button className="apt-dropdown-clear" onClick={(e) => { e.stopPropagation(); limpiarFiltro(); }} type="button"><X size={14} /></button>
-                      : <ChevronDown size={15} className={`apt-dropdown-chevron ${dropdownOpen ? 'rotated' : ''}`} />
-                    }
-                  </div>
-
-                  {dropdownOpen && (
-                    <div className="apt-dropdown-panel">
-                      {opcionesDropdown.length === 0
-                        ? <div className="apt-dropdown-empty">Sin resultados para "{dropdownQuery}"</div>
-                        : opcionesDropdown.map((p) => (
-                          <div
-                            key={p.id}
-                            className={`apt-dropdown-option ${proyectoSel?.id === p.id ? 'selected' : ''}`}
-                            onClick={() => { setProyectoSel(p); setDropdownQuery(''); setDropdownOpen(false); }}
-                          >
-                            <Building2 size={13} />
-                            <span>{p.nombre}</span>
-                            <span className="apt-dropdown-count">
-                              {inventario.filter((u) => u.proyectoId === p.id && u.status === 'Disponible').length} disp.
-                            </span>
-                          </div>
-                        ))
-                      }
-                    </div>
-                  )}
-                </div>
-              )}
+            <div className="apt-section-title">
+              <Building2 size={20} /> Inventario Disponible
             </div>
 
-            {proyectoSel && (
-              <div className="apt-filtro-activo">
-                <Building2 size={13} /> Proyecto: <strong>{proyectoSel.nombre}</strong>
-                <button onClick={limpiarFiltro} type="button"><X size={12} /></button>
-              </div>
-            )}
-
-            {inventarioFiltrado.length === 0 && (
+            {inventario.length === 0 && !error && (
               <div className="apt-empty">
                 <Home size={32} />
-                <p>{proyectoSel ? `No hay unidades disponibles en "${proyectoSel.nombre}".` : 'No hay unidades disponibles.'}</p>
-                {proyectoSel && <button className="apt-link-btn" onClick={limpiarFiltro}>Ver todos los proyectos</button>}
+                <p>No hay unidades disponibles en este momento.</p>
               </div>
             )}
 
             <div className="apt-grid">
-              {inventarioFiltrado.map((u) => (
+              {inventario.map((u) => (
                 <div
                   key={u.id}
                   className={`apt-unit-card ${u.status === 'Disponible' ? '' : 'unavailable'}`}
@@ -379,85 +325,145 @@ const ApartadoApp = () => {
                 >
                   <div className="apt-unit-header">
                     <div className="apt-unit-nombre">{u.nombre}</div>
-                    <div className={`apt-unit-badge ${u.status === 'Disponible' ? 'disponible' : 'no-disp'}`}>{u.status}</div>
+                    <div className={`apt-unit-badge ${u.status === 'Disponible' ? 'disponible' : 'no-disp'}`}>
+                      {u.status}
+                    </div>
                   </div>
+
                   <div className="apt-unit-details">
-                    {u.proyectoNombre && <span className="apt-unit-proyecto"><Building2 size={11} /> {u.proyectoNombre}</span>}
                     {u.torre && <span><Building2 size={12} /> {u.torre}</span>}
                     {u.tipo && <span><Home size={12} /> {u.tipo}</span>}
                     {u.m2 && <span>📐 {u.m2} m²</span>}
                     {u.recamaras && <span>🛏 {u.recamaras} rec</span>}
                   </div>
+
                   <div className="apt-unit-precio">{fmt(u.precio)}</div>
-                  {u.status === 'Disponible' && <button className="apt-select-btn">Seleccionar unidad →</button>}
+
+                  {u.status === 'Disponible' && (
+                    <button className="apt-select-btn">
+                      Seleccionar unidad →
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           </section>
         )}
 
-        {/* ══ PANTALLA 2: FORMULARIO ══ */}
+        {/* ══════════════════════════════════════════
+            PANTALLA 2: FORMULARIO DE PRE-APARTADO
+        ══════════════════════════════════════════ */}
         {!loading && screen === 'formulario' && unidadSel && (
           <section className="apt-form-section">
             <div className="apt-form-card">
               <div className="apt-form-card-header">
                 <Building2 size={22} />
-                <div className="apt-form-titulo">
-                  Formulario de Pre-apartado: {unidadSel.torre} - Unidad {unidadSel.nombre}
+                <div>
+                  <div className="apt-form-titulo">
+                    Formulario de Pre-apartado: {unidadSel.torre} - Unidad {unidadSel.nombre}
+                  </div>
                 </div>
               </div>
 
+              {/* Fila 1: Precio + Monto */}
               <div className="apt-form-row">
                 <div className="apt-form-field">
                   <label>Precio de Venta <span className="apt-editable">(Editable)</span></label>
                   <div className="apt-input-prefix">
                     <span>$</span>
-                    <input type="number" value={form.precioVenta} placeholder="3,500,000"
-                      onChange={(e) => setForm((p) => ({ ...p, precioVenta: e.target.value }))} />
+                    <input
+                      type="number"
+                      value={form.precioVenta}
+                      onChange={(e) => setForm((p) => ({ ...p, precioVenta: e.target.value }))}
+                      placeholder="3,500,000"
+                    />
                   </div>
                 </div>
                 <div className="apt-form-field">
                   <label>Monto de Apartado</label>
                   <div className="apt-input-prefix">
                     <span>$</span>
-                    <input type="number" value={form.montoApartado} placeholder="100,000"
-                      onChange={(e) => setForm((p) => ({ ...p, montoApartado: e.target.value }))} />
+                    <input
+                      type="number"
+                      value={form.montoApartado}
+                      onChange={(e) => setForm((p) => ({ ...p, montoApartado: e.target.value }))}
+                      placeholder="100,000"
+                    />
                   </div>
                 </div>
               </div>
 
+              {/* Esquema de pago */}
               <div className="apt-form-field apt-full">
                 <label>
                   Esquema de Pago
-                  <span className={`apt-total-badge ${esquemaValido() ? 'ok' : 'bad'}`}>Total: {totalEsquema()}%</span>
+                  <span className={`apt-total-badge ${esquemaValido() ? 'ok' : 'bad'}`}>
+                    Total: {totalEsquema()}%
+                  </span>
                 </label>
                 <div className="apt-esquema-row">
-                  {[['enganche', 'Enganche'], ['financiamiento', 'Financiamiento'], ['entrega', 'Entrega']].map(([key, label]) => (
-                    <div key={key} className="apt-esquema-item">
-                      <input type="number" min="0" max="100" value={form[key]} placeholder="0"
-                        onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))} />
-                      <span>% {label}</span>
-                    </div>
-                  ))}
+                  <div className="apt-esquema-item">
+                    <input
+                      type="number"
+                      min="0" max="100"
+                      value={form.enganche}
+                      onChange={(e) => setForm((p) => ({ ...p, enganche: e.target.value }))}
+                      placeholder="0"
+                    />
+                    <span>% Enganche</span>
+                  </div>
+                  <div className="apt-esquema-item">
+                    <input
+                      type="number"
+                      min="0" max="100"
+                      value={form.financiamiento}
+                      onChange={(e) => setForm((p) => ({ ...p, financiamiento: e.target.value }))}
+                      placeholder="0"
+                    />
+                    <span>% Financiamiento</span>
+                  </div>
+                  <div className="apt-esquema-item">
+                    <input
+                      type="number"
+                      min="0" max="100"
+                      value={form.entrega}
+                      onChange={(e) => setForm((p) => ({ ...p, entrega: e.target.value }))}
+                      placeholder="0"
+                    />
+                    <span>% Entrega</span>
+                  </div>
                 </div>
+                {/* Barra visual */}
                 <div className="apt-progress-track">
-                  <div className="apt-progress-fill" style={{ width: `${Math.min(totalEsquema(), 100)}%` }} />
+                  <div
+                    className="apt-progress-fill"
+                    style={{ width: `${Math.min(totalEsquema(), 100)}%` }}
+                  />
                 </div>
               </div>
 
+              {/* Mensualidades */}
               <div className="apt-form-row">
                 <div className="apt-form-field">
                   <label>Número de Mensualidades (If applicable)</label>
-                  <input type="number" value={form.mensualidades} placeholder="12"
-                    onChange={(e) => setForm((p) => ({ ...p, mensualidades: e.target.value }))} />
+                  <input
+                    type="number"
+                    value={form.mensualidades}
+                    onChange={(e) => setForm((p) => ({ ...p, mensualidades: e.target.value }))}
+                    placeholder="12"
+                  />
                 </div>
                 <div className="apt-form-field">
                   <label>Fecha de Inicio de Mensualidad</label>
-                  <input type="date" value={form.fechaMensualidad}
-                    onChange={(e) => setForm((p) => ({ ...p, fechaMensualidad: e.target.value }))} />
+                  <input
+                    type="date"
+                    value={form.fechaMensualidad}
+                    onChange={(e) => setForm((p) => ({ ...p, fechaMensualidad: e.target.value }))}
+                  />
                 </div>
               </div>
 
+              {/* Resumen */}
               <div className="apt-resumen-bar">
                 <span className="apt-resumen-label">Resumen de Selección</span>
                 <span className="apt-resumen-value">
@@ -466,19 +472,34 @@ const ApartadoApp = () => {
                 </span>
               </div>
 
-              {error && <div className="apt-alert error"><AlertTriangle size={14} /> {error}</div>}
+              {error && (
+                <div className="apt-alert error">
+                  <AlertTriangle size={14} /> {error}
+                </div>
+              )}
 
-              <button className="apt-confirm-btn" onClick={confirmarApartado} disabled={submitting || !esquemaValido()}>
-                {submitting
-                  ? <><Loader2 size={16} className="apt-spinner-sm" /> Procesando...</>
-                  : <><FileCheck size={16} /> Confirmar Apartado</>}
+              <button
+                className="apt-confirm-btn"
+                onClick={confirmarApartado}
+                disabled={submitting || !esquemaValido()}
+              >
+                {submitting ? (
+                  <><Loader2 size={16} className="apt-spinner-sm" /> Procesando...</>
+                ) : (
+                  <><FileCheck size={16} /> Confirmar Apartado</>
+                )}
               </button>
-              {!esquemaValido() && <p className="apt-hint">La suma del esquema de pago debe ser exactamente 100%.</p>}
+
+              {!esquemaValido() && (
+                <p className="apt-hint">La suma del esquema de pago debe ser exactamente 100%.</p>
+              )}
             </div>
           </section>
         )}
 
-        {/* ══ PANTALLA 3: CONFIRMADO ══ */}
+        {/* ══════════════════════════════════════════
+            PANTALLA 3: RESUMEN DE CONFIRMACIÓN
+        ══════════════════════════════════════════ */}
         {screen === 'confirmado' && operacion && (
           <section className="apt-confirmado">
             <div className="apt-confirm-card">
@@ -486,27 +507,52 @@ const ApartadoApp = () => {
                 <div className="apt-confirm-icon"><CheckCircle size={28} /></div>
                 <div>
                   <div className="apt-confirm-title">Pre-apartado Confirmado</div>
-                  <div className="apt-confirm-id">ID de Operación: {operacion.operacionId || 'EV-VEQ-' + Date.now()}</div>
+                  <div className="apt-confirm-id">ID de Operación: {operacion.operacionId || operacion.id || 'EV-VEQ-' + Date.now()}</div>
                 </div>
               </div>
 
               <div className="apt-confirm-grid">
-                <div><span>Unidad:</span>         <strong>{unidadSel?.torre} - {unidadSel?.nombre}</strong></div>
-                <div><span>Invitado:</span>        <strong>{contexto?.invitado}</strong></div>
-                <div><span>Asesor:</span>          <strong>{contexto?.asesor}</strong></div>
+                <div><span>Unidad:</span> <strong>{unidadSel?.torre} - {unidadSel?.nombre}</strong></div>
+                <div><span>Invitado:</span> <strong>{contexto?.invitado}</strong></div>
+                <div><span>Asesor:</span> <strong>{contexto?.asesor}</strong></div>
                 <div><span>Precio de Venta:</span> <strong>{fmt(form.precioVenta)}</strong></div>
-                <div><span>Monto Apartado:</span>  <strong>{fmt(form.montoApartado)}</strong></div>
-                <div><span>Esquema:</span>         <strong>{form.enganche}% E + {form.financiamiento}% F + {form.entrega}% D</strong></div>
+                <div><span>Monto de Apartado:</span> <strong>{fmt(form.montoApartado)}</strong></div>
+                <div>
+                  <span>Esquema:</span>
+                  <strong>{form.enganche}% E + {form.financiamiento}% F + {form.entrega}% D</strong>
+                </div>
               </div>
 
+              {/* Confirmación de contacto */}
               <div className="apt-contact-confirm">
                 <div className="apt-contact-confirm-title">Confirmación de Contacto del Cliente</div>
-                <p>Por favor <strong>confirme verbalmente con el cliente</strong> que los datos de contacto son correctos.</p>
-                {operacion.email && <div className="apt-contact-row"><CheckCircle size={14} /> Correo: <span>{operacion.email}</span></div>}
-                {operacion.whatsapp && <div className="apt-contact-row"><CheckCircle size={14} /> WhatsApp: <span>{operacion.whatsapp}</span></div>}
+                <p>
+                  Para proceder, por favor <strong>confirme verbalmente con el cliente</strong> que
+                  los siguientes datos de contacto registrados son correctos. De lo contrario,
+                  actualice los registros en la pestaña de "Detalles de Contacto" antes de finalizar.
+                </p>
+                {operacion.email && (
+                  <div className="apt-contact-row">
+                    <CheckCircle size={14} /> Correo: <span>{operacion.email}</span>
+                  </div>
+                )}
+                {operacion.whatsapp && (
+                  <div className="apt-contact-row">
+                    <CheckCircle size={14} /> WhatsApp: <span>{operacion.whatsapp}</span>
+                  </div>
+                )}
               </div>
 
-              <button className="apt-home-btn" onClick={() => { setScreen('catalogo'); setUnidadSel(null); setOperacion(null); setError(null); cargarCatalogo(); }}>
+              <button
+                className="apt-home-btn"
+                onClick={() => {
+                  setScreen('catalogo');
+                  setUnidadSel(null);
+                  setOperacion(null);
+                  setError(null);
+                  cargarCatalogo();
+                }}
+              >
                 Volver al Inicio
               </button>
             </div>
@@ -551,42 +597,32 @@ export default ApartadoApp;
 // // Cambia estas URLs por las de tu instancia n8n
 // const API_BASE = 'https://grupo-veq-n8n-grupo-veq.adsfsj.easypanel.host/webhook';
 // const ENDPOINTS = {
-//   catalogo: `${API_BASE}/apartado/catalogo`,        // GET inventario disponible
-//   verificar: `${API_BASE}/apartado/verificar`,       // POST verificar disponibilidad
-//   confirmar: `${API_BASE}/apartado/confirmar`,       // POST registrar apartado
-//   contador: `${API_BASE}/apartado/contador`,        // GET contador del evento
+//   catalogo:    `${API_BASE}/apartado/catalogo`,        // GET inventario disponible
+//   verificar:   `${API_BASE}/apartado/verificar`,       // POST verificar disponibilidad
+//   confirmar:   `${API_BASE}/apartado/confirmar`,       // POST registrar apartado
+//   contador:    `${API_BASE}/apartado/contador`,        // GET contador del evento
 // };
 
 // // ─── MODO DEMO (activo cuando el backend no responde) ────────────────────────
 // const MOCK_DATA = {
 //   contexto: {
-//     asesor: 'Ana García',
+//     asesor:   'Ana García',
 //     invitado: 'Juan Pérez',
-//     evento: 'Open House Primavera 2025',
+//     evento:   'Open House Primavera 2025',
 //     eventoId: 'EVT-DEMO-001',
 //   },
 //   contador: {
-//     apartados: 3,
-//     umbral: 10,
+//     apartados:    3,
+//     umbral:       10,
 //     precioActual: 3500000,
 //   },
-//   proyectos: [
-//     { id: 'P-01', nombre: 'Cumbres Santa Fe' },
-//     { id: 'P-02', nombre: 'Bosques de las Lomas' },
-//     { id: 'P-03', nombre: 'Punto Sur' },
-//     { id: 'P-04', nombre: 'Lirica' }
-//   ],
 //   unidades: [
-//     { id: 'U-101', nombre: 'A-101', torre: 'Torre A', tipo: 'Departamento', m2: 85, recamaras: 2, precio: 3500000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-01', proyectoNombre: 'Cumbres Santa Fe' },
-//     { id: 'U-102', nombre: 'A-102', torre: 'Torre A', tipo: 'Departamento', m2: 92, recamaras: 2, precio: 3750000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-01', proyectoNombre: 'Cumbres Santa Fe' },
-//     { id: 'U-103', nombre: 'A-103', torre: 'Torre A', tipo: 'Departamento', m2: 110, recamaras: 3, precio: 4200000, montoApartado: 120000, status: 'Disponible', proyectoId: 'P-02', proyectoNombre: 'Bosques de las Lomas' },
-//     { id: 'U-201', nombre: 'B-201', torre: 'Torre B', tipo: 'Penthouse', m2: 180, recamaras: 3, precio: 6800000, montoApartado: 200000, status: 'Disponible', proyectoId: 'P-02', proyectoNombre: 'Bosques de las Lomas' },
-//     { id: 'U-202', nombre: 'B-202', torre: 'Torre B', tipo: 'Departamento', m2: 78, recamaras: 2, precio: 3200000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-03', proyectoNombre: 'Punto Sur' },
-//     { id: 'U-203', nombre: 'B-203', torre: 'Torre B', tipo: 'Departamento', m2: 95, recamaras: 2, precio: 3600000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-03', proyectoNombre: 'Punto Sur' },
-//     { id: 'U-204', nombre: 'B-204', torre: 'Torre B', tipo: 'Departamento', m2: 88, recamaras: 2, precio: 3400000, montoApartado: 100000, status: 'Apartado', proyectoId: 'P-01', proyectoNombre: 'Cumbres Santa Fe' },
-//     { id: 'U-205', nombre: 'B-205', torre: 'Torre B', tipo: 'Departamento', m2: 82, recamaras: 2, precio: 3300000, montoApartado: 100000, status: 'Apartado', proyectoId: 'P-02', proyectoNombre: 'Bosques de las Lomas' },
-//     { id: 'U-206', nombre: 'B-206', torre: 'Torre B', tipo: 'Departamento', m2: 90, recamaras: 2, precio: 3500000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-03', proyectoNombre: 'Lirica' },
-//     { id: 'U-207', nombre: 'B-207', torre: 'Torre B', tipo: 'Departamento', m2: 85, recamaras: 2, precio: 3400000, montoApartado: 100000, status: 'Apartado', proyectoId: 'P-01', proyectoNombre: 'Lirica' }
+//     { id: 'U-101', nombre: 'A-101', torre: 'Torre A', tipo: 'Departamento', m2: 85,  recamaras: 2, precio: 3500000, montoApartado: 100000, status: 'Disponible' },
+//     { id: 'U-102', nombre: 'A-102', torre: 'Torre A', tipo: 'Departamento', m2: 92,  recamaras: 2, precio: 3750000, montoApartado: 100000, status: 'Disponible' },
+//     { id: 'U-103', nombre: 'A-103', torre: 'Torre A', tipo: 'Departamento', m2: 110, recamaras: 3, precio: 4200000, montoApartado: 120000, status: 'Disponible' },
+//     { id: 'U-201', nombre: 'B-201', torre: 'Torre B', tipo: 'Penthouse',    m2: 180, recamaras: 3, precio: 6800000, montoApartado: 200000, status: 'Disponible' },
+//     { id: 'U-202', nombre: 'B-202', torre: 'Torre B', tipo: 'Departamento', m2: 78,  recamaras: 2, precio: 3200000, montoApartado: 100000, status: 'Apartado'   },
+//     { id: 'U-203', nombre: 'B-203', torre: 'Torre B', tipo: 'Departamento', m2: 95,  recamaras: 2, precio: 3600000, montoApartado: 100000, status: 'Disponible' },
 //   ],
 // };
 
@@ -613,18 +649,11 @@ export default ApartadoApp;
 //   const [screen, setScreen] = useState('catalogo');
 
 //   // Datos
-//   const [inventario, setInventario] = useState([]);
-//   const [proyectos, setProyectos] = useState([]);   // lista completa de proyectos
-//   const [unidadSel, setUnidadSel] = useState(null);
-//   const [contexto, setContexto] = useState(null);
-//   const [operacion, setOperacion] = useState(null);
-//   const [contador, setContador] = useState(null);
-
-//   // Dropdown de proyecto
-//   const [proyectoSel, setProyectoSel] = useState(null);   // { id, nombre } | null
-//   const [dropdownQuery, setDropdownQuery] = useState('');      // texto que escribe el usuario
-//   const [dropdownOpen, setDropdownOpen] = useState(false);   // visibilidad del panel
-//   const dropdownRef = React.useRef(null);
+//   const [inventario,   setInventario]   = useState([]);
+//   const [unidadSel,    setUnidadSel]    = useState(null);
+//   const [contexto,     setContexto]     = useState(null); // { asesor, invitado, evento }
+//   const [operacion,    setOperacion]    = useState(null); // resultado del apartado
+//   const [contador,     setContador]     = useState(null); // { apartados, umbral, precio_actual }
 
 //   // Formulario
 //   const [form, setForm] = useState({
@@ -640,10 +669,10 @@ export default ApartadoApp;
 //   // UI state
 //   const [loading, setLoading] = useState(true);
 //   const [submitting, setSubmitting] = useState(false);
-//   const [error, setError] = useState(null);
+//   const [error,      setError]      = useState(null);
 //   const [isDemoMode, setIsDemoMode] = useState(false);
-//   const [isOnline, setIsOnline] = useState(navigator.onLine);
-//   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
+//   const [isOnline,   setIsOnline]   = useState(navigator.onLine);
+//   const [theme,      setTheme]     = useState(() => localStorage.getItem('theme') || 'light');
 
 //   useEffect(() => {
 //     localStorage.setItem('theme', theme);
@@ -687,16 +716,16 @@ export default ApartadoApp;
 //       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 //       const data = await res.json();
 
-//       // Esperamos: { unidades: [...], proyectos: [...], contexto: {...}, contador: {...} }
-//       setInventario(data.unidades || []);
-//       setProyectos(data.proyectos || []);
-//       setContexto(data.contexto || null);
-//       setContador(data.contador || null);
+//       // Esperamos: { unidades: [...], contexto: { asesor, invitado, evento }, contador: {...} }
+//       setInventario(data.unidades  || []);
+//       setContexto(data.contexto   || null);
+//       setContador(data.contador   || null);
+
+//       // Pre-cargar precio de la primera unidad si quieres
 //     } catch (err) {
 //       // Backend no disponible → modo demo con datos mock
 //       console.warn('[ApartadoApp] Backend no disponible, usando datos demo:', err.message);
 //       setInventario(MOCK_DATA.unidades);
-//       setProyectos(MOCK_DATA.proyectos);
 //       setContexto(MOCK_DATA.contexto);
 //       setContador(MOCK_DATA.contador);
 //       setError(null); // no mostrar error, el demo se ve limpio
@@ -749,10 +778,10 @@ export default ApartadoApp;
 //       await new Promise((r) => setTimeout(r, 1200)); // simula latencia
 //       setOperacion({
 //         operacionId: 'EV-VEQ-DEMO-001',
-//         email: 'juan.perez@demo.com',
-//         whatsapp: '+52 33 1234 5678',
-//         contador: { apartados: (contador?.apartados || 0) + 1, umbral: contador?.umbral || 10, precioActual: contador?.precioActual || 3500000 },
-//         message: 'Pre-apartado registrado exitosamente (modo demo)',
+//         email:       'juan.perez@demo.com',
+//         whatsapp:    '+52 33 1234 5678',
+//         contador:    { apartados: (contador?.apartados || 0) + 1, umbral: contador?.umbral || 10, precioActual: contador?.precioActual || 3500000 },
+//         message:     'Pre-apartado registrado exitosamente (modo demo)',
 //       });
 //       setSubmitting(false);
 //       setScreen('confirmado');
@@ -881,13 +910,6 @@ export default ApartadoApp;
 //       </header>
 
 //       <main className="apt-main">
-
-//         {/* ── BANNER MODO DEMO ── */}
-//         {isDemoMode && (
-//           <div className="apt-demo-banner">
-//             🧪 <strong>Modo demo</strong> — datos simulados. Conecta n8n para usar datos reales de Salesforce.
-//           </div>
-//         )}
 
 //         {/* ── CONTADOR DEL EVENTO ── */}
 //         {contador && (
@@ -1045,10 +1067,9 @@ export default ApartadoApp;
 //                   </div>
 
 //                   <div className="apt-unit-details">
-//                     {u.proyectoNombre && <span className="apt-unit-proyecto"><Building2 size={11} /> {u.proyectoNombre}</span>}
-//                     {u.torre && <span><Building2 size={12} /> {u.torre}</span>}
-//                     {u.tipo && <span><Home size={12} /> {u.tipo}</span>}
-//                     {u.m2 && <span>📐 {u.m2} m²</span>}
+//                     {u.torre    && <span><Building2 size={12} /> {u.torre}</span>}
+//                     {u.tipo     && <span><Home size={12} /> {u.tipo}</span>}
+//                     {u.m2       && <span>📐 {u.m2} m²</span>}
 //                     {u.recamaras && <span>🛏 {u.recamaras} rec</span>}
 //                   </div>
 
@@ -1280,3 +1301,626 @@ export default ApartadoApp;
 // };
 
 // export default ApartadoApp;
+
+
+// Datos sinteticos para pruebas
+
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Building2,
+  CheckCircle,
+  XCircle,
+  Wifi,
+  WifiOff,
+  Sun,
+  Moon,
+  ArrowLeft,
+  AlertTriangle,
+  Loader2,
+  DollarSign,
+  Home,
+  Hash,
+  Users,
+  TrendingUp,
+  FileCheck,
+} from 'lucide-react';
+import './ApartadoApp.css';
+
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+// Cambia estas URLs por las de tu instancia n8n
+const API_BASE = 'https://grupo-veq-n8n-grupo-veq.adsfsj.easypanel.host/webhook';
+const ENDPOINTS = {
+  catalogo: `${API_BASE}/apartado/catalogo`,        // GET inventario disponible
+  verificar: `${API_BASE}/apartado/verificar`,       // POST verificar disponibilidad
+  confirmar: `${API_BASE}/apartado/confirmar`,       // POST registrar apartado
+  contador: `${API_BASE}/apartado/contador`,        // GET contador del evento
+};
+
+// ─── MODO DEMO (activo cuando el backend no responde) ────────────────────────
+const MOCK_DATA = {
+  contexto: {
+    asesor: 'Ana García',
+    invitado: 'Juan Pérez',
+    evento: 'Open House Primavera 2025',
+    eventoId: 'EVT-DEMO-001',
+  },
+  contador: {
+    apartados: 3,
+    umbral: 10,
+    precioActual: 3500000,
+  },
+  unidades: [
+    { id: 'U-101', nombre: 'A-101', torre: 'Torre A', tipo: 'Departamento', m2: 85, recamaras: 2, precio: 3500000, montoApartado: 100000, status: 'Disponible' },
+    { id: 'U-102', nombre: 'A-102', torre: 'Torre A', tipo: 'Departamento', m2: 92, recamaras: 2, precio: 3750000, montoApartado: 100000, status: 'Disponible' },
+    { id: 'U-103', nombre: 'A-103', torre: 'Torre A', tipo: 'Departamento', m2: 110, recamaras: 3, precio: 4200000, montoApartado: 120000, status: 'Disponible' },
+    { id: 'U-201', nombre: 'B-201', torre: 'Torre B', tipo: 'Penthouse', m2: 180, recamaras: 3, precio: 6800000, montoApartado: 200000, status: 'Disponible' },
+    { id: 'U-202', nombre: 'B-202', torre: 'Torre B', tipo: 'Departamento', m2: 78, recamaras: 2, precio: 3200000, montoApartado: 100000, status: 'Apartado' },
+    { id: 'U-203', nombre: 'B-203', torre: 'Torre B', tipo: 'Departamento', m2: 95, recamaras: 2, precio: 3600000, montoApartado: 100000, status: 'Disponible' },
+  ],
+};
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const fmt = (n) =>
+  new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n);
+
+const parseUrlParams = () => {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    invitadoId: params.get('invitadoId') || params.get('invitado') || null,
+    oppId: params.get('oppId') || params.get('opp') || null,
+    token: params.get('token') || null,
+    eventId: params.get('eventId') || params.get('evento') || null,
+  };
+};
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
+const ApartadoApp = () => {
+  // Contexto de URL
+  const [urlParams] = useState(parseUrlParams);
+
+  // Pantalla activa: 'catalogo' | 'formulario' | 'confirmado' | 'error'
+  const [screen, setScreen] = useState('catalogo');
+
+  // Datos
+  const [inventario, setInventario] = useState([]);
+  const [unidadSel, setUnidadSel] = useState(null);
+  const [contexto, setContexto] = useState(null); // { asesor, invitado, evento }
+  const [operacion, setOperacion] = useState(null); // resultado del apartado
+  const [contador, setContador] = useState(null); // { apartados, umbral, precio_actual }
+
+  // Formulario
+  const [form, setForm] = useState({
+    precioVenta: '',
+    montoApartado: '',
+    enganche: '',
+    financiamiento: '',
+    entrega: '',
+    mensualidades: '',
+    fechaMensualidad: '',
+  });
+
+  // UI state
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
+
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const up = () => setIsOnline(true);
+    const down = () => setIsOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+  }, []);
+
+  // ── Cargar catálogo e info de contexto ──
+  const cargarCatalogo = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(ENDPOINTS.catalogo, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invitadoId: urlParams.invitadoId,
+          oppId: urlParams.oppId,
+          token: urlParams.token,
+          eventId: urlParams.eventId,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      // Esperamos: { unidades: [...], contexto: { asesor, invitado, evento }, contador: {...} }
+      setInventario(data.unidades || []);
+      setContexto(data.contexto || null);
+      setContador(data.contador || null);
+
+      // Pre-cargar precio de la primera unidad si quieres
+    } catch (err) {
+      // Backend no disponible → modo demo con datos mock
+      console.warn('[ApartadoApp] Backend no disponible, usando datos demo:', err.message);
+      setInventario(MOCK_DATA.unidades);
+      setContexto(MOCK_DATA.contexto);
+      setContador(MOCK_DATA.contador);
+      setError(null); // no mostrar error, el demo se ve limpio
+      setIsDemoMode(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [urlParams]);
+
+  useEffect(() => { cargarCatalogo(); }, [cargarCatalogo]);
+
+  // ── Seleccionar unidad → ir a formulario ──
+  const seleccionarUnidad = (unidad) => {
+    setUnidadSel(unidad);
+    setForm((prev) => ({
+      ...prev,
+      precioVenta: String(unidad.precio || ''),
+      montoApartado: String(unidad.montoApartado || ''),
+      enganche: '',
+      financiamiento: '',
+      entrega: '',
+      mensualidades: '',
+      fechaMensualidad: '',
+    }));
+    setScreen('formulario');
+    setError(null);
+  };
+
+  // ── Validar suma esquema de pago ──
+  const totalEsquema = () => {
+    const e = Number(form.enganche) || 0;
+    const f = Number(form.financiamiento) || 0;
+    const d = Number(form.entrega) || 0;
+    return e + f + d;
+  };
+
+  const esquemaValido = () => totalEsquema() === 100;
+
+  // ── Confirmar apartado ──
+  const confirmarApartado = async () => {
+    if (!esquemaValido()) {
+      setError('La suma de Enganche + Financiamiento + Entrega debe ser exactamente 100%.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+
+    // ── MODO DEMO: simular confirmación sin backend ──
+    if (isDemoMode) {
+      await new Promise((r) => setTimeout(r, 1200)); // simula latencia
+      setOperacion({
+        operacionId: 'EV-VEQ-DEMO-001',
+        email: 'juan.perez@demo.com',
+        whatsapp: '+52 33 1234 5678',
+        contador: { apartados: (contador?.apartados || 0) + 1, umbral: contador?.umbral || 10, precioActual: contador?.precioActual || 3500000 },
+        message: 'Pre-apartado registrado exitosamente (modo demo)',
+      });
+      setSubmitting(false);
+      setScreen('confirmado');
+      return;
+    }
+
+    const payload = {
+      invitadoId: urlParams.invitadoId,
+      oppId: urlParams.oppId,
+      token: urlParams.token,
+      eventId: urlParams.eventId,
+      unidadId: unidadSel.id,
+      unidadNombre: unidadSel.nombre,
+      precioVenta: Number(form.precioVenta),
+      montoApartado: Number(form.montoApartado),
+      esquemaPago: {
+        enganche: Number(form.enganche),
+        financiamiento: Number(form.financiamiento),
+        entrega: Number(form.entrega),
+      },
+      mensualidades: form.mensualidades ? Number(form.mensualidades) : null,
+      fechaMensualidad: form.fechaMensualidad || null,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      // 1. Verificar disponibilidad anti-colisión
+      const verRes = await fetch(ENDPOINTS.verificar, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unidadId: unidadSel.id, token: urlParams.token }),
+      });
+      const verData = await verRes.json();
+      if (!verRes.ok || verData.disponible === false) {
+        setError('⚠️ Unidad no disponible. Selecciona otra unidad.');
+        setSubmitting(false);
+        setScreen('catalogo');
+        await cargarCatalogo();
+        return;
+      }
+
+      // 2. Registrar apartado
+      const confRes = await fetch(ENDPOINTS.confirmar, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const confData = await confRes.json();
+      if (!confRes.ok) throw new Error(confData.error || 'Error al confirmar');
+
+      setOperacion(confData);
+      setContador(confData.contador || contador);
+      setScreen('confirmado');
+    } catch (err) {
+      setError('Error al procesar el apartado: ' + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const toggleTheme = () => setTheme((p) => (p === 'dark' ? 'light' : 'dark'));
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
+  return (
+    <div className={`apt-app ${theme === 'dark' ? 'theme-dark' : 'theme-light'}`}>
+
+      {/* ── HEADER ── */}
+      <header className="apt-header">
+        <div className="apt-header-inner">
+          <div className="apt-header-left">
+            {screen === 'formulario' && (
+              <button className="apt-back-btn" onClick={() => { setScreen('catalogo'); setError(null); }}>
+                <ArrowLeft size={16} /> Catálogo
+              </button>
+            )}
+            <div>
+              <div className="apt-header-title">Eventos VEQ - Pre-apartado de Unidad</div>
+              <div className="apt-header-subtitle">Confirma tu apartado y esquema de pago</div>
+            </div>
+          </div>
+
+          <div className="apt-header-actions">
+            <div className={`apt-status-badge ${isOnline ? 'online' : 'offline'}`}>
+              {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
+              {isOnline ? 'En línea' : 'Sin conexión'}
+            </div>
+            <button className="apt-icon-btn" onClick={toggleTheme} type="button">
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              {theme === 'dark' ? 'Claro' : 'Oscuro'}
+            </button>
+          </div>
+        </div>
+
+        {/* Tarjetas de contexto */}
+        {contexto && (
+          <div className="apt-context-bar">
+            <div className="apt-ctx-chip">
+              <Users size={14} /> Asesor: <strong>{contexto.asesor || '—'}</strong>
+            </div>
+            <div className="apt-ctx-chip">
+              <Users size={14} /> Invitado: <strong>{contexto.invitado || '—'}</strong>
+            </div>
+            <div className="apt-ctx-chip confirmed">
+              <CheckCircle size={14} /> Estado: <strong>Confirmado (Asistió)</strong>
+            </div>
+          </div>
+        )}
+      </header>
+
+      <main className="apt-main">
+
+        {/* ── BANNER MODO DEMO ── */}
+        {isDemoMode && (
+          <div className="apt-demo-banner">
+            🧪 <strong>Modo demo</strong> — datos simulados. Conecta n8n para usar datos reales de Salesforce.
+          </div>
+        )}
+
+        {/* ── CONTADOR DEL EVENTO ── */}
+        {contador && (
+          <section className="apt-counter-bar">
+            <div className="apt-counter-item">
+              <Hash size={14} /> Apartados: <strong>{contador.apartados}</strong>
+            </div>
+            <div className="apt-counter-item">
+              <TrendingUp size={14} /> Umbral: <strong>{contador.umbral}</strong>
+            </div>
+            <div className="apt-counter-item price">
+              <DollarSign size={14} /> Precio Vigente: <strong>{fmt(contador.precioActual)}</strong>
+            </div>
+            {contador.apartados >= contador.umbral && (
+              <div className="apt-counter-alert">
+                <TrendingUp size={14} /> ¡Umbral alcanzado! Precios actualizados
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* ── LOADING ── */}
+        {loading && (
+          <div className="apt-center">
+            <Loader2 className="apt-spinner" size={32} />
+            <p>Cargando inventario...</p>
+          </div>
+        )}
+
+        {/* ── ERROR GLOBAL ── */}
+        {error && !loading && (
+          <div className="apt-alert error">
+            <AlertTriangle size={16} /> {error}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════
+            PANTALLA 1: CATÁLOGO DE UNIDADES
+        ══════════════════════════════════════════ */}
+        {!loading && screen === 'catalogo' && (
+          <section className="apt-catalogo">
+            <div className="apt-section-title">
+              <Building2 size={20} /> Inventario Disponible
+            </div>
+
+            {inventario.length === 0 && !error && (
+              <div className="apt-empty">
+                <Home size={32} />
+                <p>No hay unidades disponibles en este momento.</p>
+              </div>
+            )}
+
+            <div className="apt-grid">
+              {inventario.map((u) => (
+                <div
+                  key={u.id}
+                  className={`apt-unit-card ${u.status === 'Disponible' ? '' : 'unavailable'}`}
+                  onClick={() => u.status === 'Disponible' && seleccionarUnidad(u)}
+                >
+                  <div className="apt-unit-header">
+                    <div className="apt-unit-nombre">{u.nombre}</div>
+                    <div className={`apt-unit-badge ${u.status === 'Disponible' ? 'disponible' : 'no-disp'}`}>
+                      {u.status}
+                    </div>
+                  </div>
+
+                  <div className="apt-unit-details">
+                    {u.torre && <span><Building2 size={12} /> {u.torre}</span>}
+                    {u.tipo && <span><Home size={12} /> {u.tipo}</span>}
+                    {u.m2 && <span>📐 {u.m2} m²</span>}
+                    {u.recamaras && <span>🛏 {u.recamaras} rec</span>}
+                  </div>
+
+                  <div className="apt-unit-precio">{fmt(u.precio)}</div>
+
+                  {u.status === 'Disponible' && (
+                    <button className="apt-select-btn">
+                      Seleccionar unidad →
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ══════════════════════════════════════════
+            PANTALLA 2: FORMULARIO DE PRE-APARTADO
+        ══════════════════════════════════════════ */}
+        {!loading && screen === 'formulario' && unidadSel && (
+          <section className="apt-form-section">
+            <div className="apt-form-card">
+              <div className="apt-form-card-header">
+                <Building2 size={22} />
+                <div>
+                  <div className="apt-form-titulo">
+                    Formulario de Pre-apartado: {unidadSel.torre} - Unidad {unidadSel.nombre}
+                  </div>
+                </div>
+              </div>
+
+              {/* Fila 1: Precio + Monto */}
+              <div className="apt-form-row">
+                <div className="apt-form-field">
+                  <label>Precio de Venta <span className="apt-editable">(Editable)</span></label>
+                  <div className="apt-input-prefix">
+                    <span>$</span>
+                    <input
+                      type="number"
+                      value={form.precioVenta}
+                      onChange={(e) => setForm((p) => ({ ...p, precioVenta: e.target.value }))}
+                      placeholder="3,500,000"
+                    />
+                  </div>
+                </div>
+                <div className="apt-form-field">
+                  <label>Monto de Apartado</label>
+                  <div className="apt-input-prefix">
+                    <span>$</span>
+                    <input
+                      type="number"
+                      value={form.montoApartado}
+                      onChange={(e) => setForm((p) => ({ ...p, montoApartado: e.target.value }))}
+                      placeholder="100,000"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Esquema de pago */}
+              <div className="apt-form-field apt-full">
+                <label>
+                  Esquema de Pago
+                  <span className={`apt-total-badge ${esquemaValido() ? 'ok' : 'bad'}`}>
+                    Total: {totalEsquema()}%
+                  </span>
+                </label>
+                <div className="apt-esquema-row">
+                  <div className="apt-esquema-item">
+                    <input
+                      type="number"
+                      min="0" max="100"
+                      value={form.enganche}
+                      onChange={(e) => setForm((p) => ({ ...p, enganche: e.target.value }))}
+                      placeholder="0"
+                    />
+                    <span>% Enganche</span>
+                  </div>
+                  <div className="apt-esquema-item">
+                    <input
+                      type="number"
+                      min="0" max="100"
+                      value={form.financiamiento}
+                      onChange={(e) => setForm((p) => ({ ...p, financiamiento: e.target.value }))}
+                      placeholder="0"
+                    />
+                    <span>% Financiamiento</span>
+                  </div>
+                  <div className="apt-esquema-item">
+                    <input
+                      type="number"
+                      min="0" max="100"
+                      value={form.entrega}
+                      onChange={(e) => setForm((p) => ({ ...p, entrega: e.target.value }))}
+                      placeholder="0"
+                    />
+                    <span>% Entrega</span>
+                  </div>
+                </div>
+                {/* Barra visual */}
+                <div className="apt-progress-track">
+                  <div
+                    className="apt-progress-fill"
+                    style={{ width: `${Math.min(totalEsquema(), 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Mensualidades */}
+              <div className="apt-form-row">
+                <div className="apt-form-field">
+                  <label>Número de Mensualidades (If applicable)</label>
+                  <input
+                    type="number"
+                    value={form.mensualidades}
+                    onChange={(e) => setForm((p) => ({ ...p, mensualidades: e.target.value }))}
+                    placeholder="12"
+                  />
+                </div>
+                <div className="apt-form-field">
+                  <label>Fecha de Inicio de Mensualidad</label>
+                  <input
+                    type="date"
+                    value={form.fechaMensualidad}
+                    onChange={(e) => setForm((p) => ({ ...p, fechaMensualidad: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Resumen */}
+              <div className="apt-resumen-bar">
+                <span className="apt-resumen-label">Resumen de Selección</span>
+                <span className="apt-resumen-value">
+                  {unidadSel.torre ? `${unidadSel.torre} - ` : ''}{unidadSel.nombre}
+                  {form.precioVenta ? ` · ${fmt(form.precioVenta)}` : ''}
+                </span>
+              </div>
+
+              {error && (
+                <div className="apt-alert error">
+                  <AlertTriangle size={14} /> {error}
+                </div>
+              )}
+
+              <button
+                className="apt-confirm-btn"
+                onClick={confirmarApartado}
+                disabled={submitting || !esquemaValido()}
+              >
+                {submitting ? (
+                  <><Loader2 size={16} className="apt-spinner-sm" /> Procesando...</>
+                ) : (
+                  <><FileCheck size={16} /> Confirmar Apartado</>
+                )}
+              </button>
+
+              {!esquemaValido() && (
+                <p className="apt-hint">La suma del esquema de pago debe ser exactamente 100%.</p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ══════════════════════════════════════════
+            PANTALLA 3: RESUMEN DE CONFIRMACIÓN
+        ══════════════════════════════════════════ */}
+        {screen === 'confirmado' && operacion && (
+          <section className="apt-confirmado">
+            <div className="apt-confirm-card">
+              <div className="apt-confirm-header">
+                <div className="apt-confirm-icon"><CheckCircle size={28} /></div>
+                <div>
+                  <div className="apt-confirm-title">Pre-apartado Confirmado</div>
+                  <div className="apt-confirm-id">ID de Operación: {operacion.operacionId || operacion.id || 'EV-VEQ-' + Date.now()}</div>
+                </div>
+              </div>
+
+              <div className="apt-confirm-grid">
+                <div><span>Unidad:</span> <strong>{unidadSel?.torre} - {unidadSel?.nombre}</strong></div>
+                <div><span>Invitado:</span> <strong>{contexto?.invitado}</strong></div>
+                <div><span>Asesor:</span> <strong>{contexto?.asesor}</strong></div>
+                <div><span>Precio de Venta:</span> <strong>{fmt(form.precioVenta)}</strong></div>
+                <div><span>Monto de Apartado:</span> <strong>{fmt(form.montoApartado)}</strong></div>
+                <div>
+                  <span>Esquema:</span>
+                  <strong>{form.enganche}% E + {form.financiamiento}% F + {form.entrega}% D</strong>
+                </div>
+              </div>
+
+              {/* Confirmación de contacto */}
+              <div className="apt-contact-confirm">
+                <div className="apt-contact-confirm-title">Confirmación de Contacto del Cliente</div>
+                <p>
+                  Para proceder, por favor <strong>confirme verbalmente con el cliente</strong> que
+                  los siguientes datos de contacto registrados son correctos. De lo contrario,
+                  actualice los registros en la pestaña de "Detalles de Contacto" antes de finalizar.
+                </p>
+                {operacion.email && (
+                  <div className="apt-contact-row">
+                    <CheckCircle size={14} /> Correo: <span>{operacion.email}</span>
+                  </div>
+                )}
+                {operacion.whatsapp && (
+                  <div className="apt-contact-row">
+                    <CheckCircle size={14} /> WhatsApp: <span>{operacion.whatsapp}</span>
+                  </div>
+                )}
+              </div>
+
+              <button
+                className="apt-home-btn"
+                onClick={() => {
+                  setScreen('catalogo');
+                  setUnidadSel(null);
+                  setOperacion(null);
+                  setError(null);
+                  cargarCatalogo();
+                }}
+              >
+                Volver al Inicio
+              </button>
+            </div>
+          </section>
+        )}
+
+      </main>
+    </div>
+  );
+};
+
+export default ApartadoApp;
