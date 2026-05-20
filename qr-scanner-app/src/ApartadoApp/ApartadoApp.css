@@ -376,6 +376,84 @@
 }
 
 /* ── PROYECTO DROPDOWN ── */
+.apt-filtros-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 260px;
+  max-width: 720px;
+  flex-wrap: wrap;
+}
+
+.apt-filtro-control {
+  position: relative;
+  flex: 1;
+  min-width: 180px;
+}
+
+/* Multi-select: el trigger ya no tiene un <input>, tiene un div con el label */
+.apt-dropdown-multilabel {
+  flex: 1;
+  font-size: 0.88rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.apt-dropdown-placeholder {
+  color: var(--muted);
+}
+
+/* Checkbox visual dentro de las opciones del dropdown */
+.apt-checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--input-border);
+  background: var(--input-bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.apt-checkbox.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.apt-checkbox.checked svg {
+  color: #fff !important;
+}
+
+/* Trigger disabled (cuando el filtro no tiene datos) */
+.apt-dropdown-trigger.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.apt-dropdown-trigger.disabled:hover {
+  border-color: var(--card-border);
+  box-shadow: none;
+}
+
+/* Fila de chips de filtros activos */
+.apt-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.apt-chips-clear {
+  margin-left: 0.25rem;
+}
+
 .apt-proyecto-dropdown {
   position: relative;
   min-width: 260px;
@@ -589,6 +667,14 @@
     align-items: flex-start;
   }
 
+  .apt-filtros-wrapper {
+    min-width: 100%;
+    max-width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .apt-filtro-control,
   .apt-proyecto-dropdown {
     min-width: 100%;
     max-width: 100%;

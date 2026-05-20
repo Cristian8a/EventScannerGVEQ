@@ -41,11 +41,16 @@ const ApartadoApp = () => {
   const [unidadSel, setUnidadSel] = useState(null);
   const [operacion, setOperacion] = useState(null);
 
-  // Dropdown
-  const [proyectoSel, setProyectoSel] = useState(null);
-  const [dropdownQuery, setDropdownQuery] = useState('');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef(null);
+  // Filtros (acumulables: los 3 se combinan con AND, multi-select dentro de cada uno)
+  const [proyectosSel, setProyectosSel] = useState([]);   // array de objetos {id, nombre}
+  const [categoriasSel, setCategoriasSel] = useState([]); // array de strings
+  const [nombreQuery, setNombreQuery] = useState('');
+  const [proyectoDropdownOpen, setProyectoDropdownOpen] = useState(false);
+  const [categoriaDropdownOpen, setCategoriaDropdownOpen] = useState(false);
+  const [sugerenciasOpen, setSugerenciasOpen] = useState(false);
+  const proyectoDropdownRef = useRef(null);
+  const categoriaDropdownRef = useRef(null);
+  const sugerenciasRef = useRef(null);
 
   // Formulario
   const [form, setForm] = useState({
@@ -76,8 +81,12 @@ const ApartadoApp = () => {
 
   useEffect(() => {
     const handler = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target))
-        setDropdownOpen(false);
+      if (proyectoDropdownRef.current && !proyectoDropdownRef.current.contains(e.target))
+        setProyectoDropdownOpen(false);
+      if (categoriaDropdownRef.current && !categoriaDropdownRef.current.contains(e.target))
+        setCategoriaDropdownOpen(false);
+      if (sugerenciasRef.current && !sugerenciasRef.current.contains(e.target))
+        setSugerenciasOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -139,15 +148,58 @@ const ApartadoApp = () => {
 
   useEffect(() => { cargarCatalogo(); }, [cargarCatalogo]);
 
-  // ── Derived: filtrado ────────────────────────────────────────────────────────
-  const opcionesDropdown = proyectos.filter((p) =>
-    p.nombre.toLowerCase().includes(dropdownQuery.toLowerCase())
-  );
-  const inventarioFiltrado = proyectoSel
-    ? inventario.filter((u) => u.proyectoId === proyectoSel.id)
-    : inventario;
+  // ── Derived: filtrado (acumulable AND, multi-select por filtro) ──────────────
+  // Categorías únicas derivadas del inventario (campo "tipo" = familia de SF)
+  const categorias = Array.from(
+    new Set(inventario.map((u) => u.tipo).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, 'es'));
 
-  const limpiarFiltro = () => { setProyectoSel(null); setDropdownQuery(''); setDropdownOpen(false); };
+  // Sugerencias de nombre (mientras el usuario teclea)
+  const nombresDisponibles = Array.from(
+    new Set(inventario.map((u) => u.nombre).filter(Boolean))
+  );
+  const sugerenciasNombre = nombreQuery.trim()
+    ? nombresDisponibles
+      .filter((n) => n.toLowerCase().includes(nombreQuery.toLowerCase()))
+      .slice(0, 8)
+    : [];
+
+  // Aplicar TODOS los filtros activos (AND)
+  const proyectoIdsSel = proyectosSel.map((p) => p.id);
+  const nombreQ = nombreQuery.toLowerCase().trim();
+
+  const inventarioFiltrado = inventario.filter((u) => {
+    if (proyectosSel.length > 0 && !proyectoIdsSel.includes(u.proyectoId)) return false;
+    if (categoriasSel.length > 0 && !categoriasSel.includes(u.tipo)) return false;
+    if (nombreQ && !(u.nombre || '').toLowerCase().includes(nombreQ)) return false;
+    return true;
+  });
+
+  // Toggle helpers para multi-select
+  const toggleProyecto = (p) => {
+    setProyectosSel((prev) =>
+      prev.some((x) => x.id === p.id)
+        ? prev.filter((x) => x.id !== p.id)
+        : [...prev, p]
+    );
+  };
+  const toggleCategoria = (cat) => {
+    setCategoriasSel((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const limpiarTodo = () => {
+    setProyectosSel([]);
+    setCategoriasSel([]);
+    setNombreQuery('');
+    setProyectoDropdownOpen(false);
+    setCategoriaDropdownOpen(false);
+    setSugerenciasOpen(false);
+  };
+
+  const totalFiltrosActivos =
+    proyectosSel.length + categoriasSel.length + (nombreQ ? 1 : 0);
 
   // ── Formulario ───────────────────────────────────────────────────────────────
   const seleccionarUnidad = (u) => {
@@ -306,67 +358,162 @@ const ApartadoApp = () => {
                 </span>
               </div>
 
-              {/* Dropdown de proyecto — solo aparece si hay proyectos */}
-              {proyectos.length > 0 && (
-                <div className="apt-proyecto-dropdown" ref={dropdownRef}>
-                  <div
-                    className={`apt-dropdown-trigger ${dropdownOpen ? 'open' : ''} ${proyectoSel ? 'has-value' : ''}`}
-                    onClick={() => setDropdownOpen((v) => !v)}
-                  >
+              {/* Tres filtros independientes — acumulables con AND */}
+              <div className="apt-filtros-wrapper">
+
+                {/* Filtro: Nombre del producto con sugerencias en vivo */}
+                <div className="apt-filtro-control" ref={sugerenciasRef}>
+                  <div className={`apt-dropdown-trigger ${sugerenciasOpen ? 'open' : ''} ${nombreQuery ? 'has-value' : ''}`}>
                     <Search size={15} className="apt-dropdown-icon-left" />
                     <input
                       className="apt-dropdown-input"
-                      placeholder="Filtrar por proyecto..."
-                      value={proyectoSel ? proyectoSel.nombre : dropdownQuery}
-                      onChange={(e) => { setDropdownQuery(e.target.value); setProyectoSel(null); setDropdownOpen(true); }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDropdownOpen(true);
-                        if (proyectoSel) { setDropdownQuery(''); setProyectoSel(null); }
-                      }}
+                      placeholder="Nombre del producto..."
+                      value={nombreQuery}
+                      onChange={(e) => { setNombreQuery(e.target.value); setSugerenciasOpen(true); }}
+                      onFocus={() => setSugerenciasOpen(true)}
                     />
-                    {proyectoSel
-                      ? <button className="apt-dropdown-clear" onClick={(e) => { e.stopPropagation(); limpiarFiltro(); }} type="button"><X size={14} /></button>
-                      : <ChevronDown size={15} className={`apt-dropdown-chevron ${dropdownOpen ? 'rotated' : ''}`} />
-                    }
+                    {nombreQuery && (
+                      <button
+                        className="apt-dropdown-clear"
+                        onClick={(e) => { e.stopPropagation(); setNombreQuery(''); setSugerenciasOpen(false); }}
+                        type="button"
+                      ><X size={14} /></button>
+                    )}
                   </div>
-
-                  {dropdownOpen && (
+                  {sugerenciasOpen && sugerenciasNombre.length > 0 && (
                     <div className="apt-dropdown-panel">
-                      {opcionesDropdown.length === 0
-                        ? <div className="apt-dropdown-empty">Sin resultados para "{dropdownQuery}"</div>
-                        : opcionesDropdown.map((p) => (
-                          <div
-                            key={p.id}
-                            className={`apt-dropdown-option ${proyectoSel?.id === p.id ? 'selected' : ''}`}
-                            onClick={() => { setProyectoSel(p); setDropdownQuery(''); setDropdownOpen(false); }}
-                          >
-                            <Building2 size={13} />
-                            <span>{p.nombre}</span>
-                            <span className="apt-dropdown-count">
-                              {inventario.filter((u) => u.proyectoId === p.id && u.status === 'Disponible').length} disp.
-                            </span>
-                          </div>
-                        ))
-                      }
+                      {sugerenciasNombre.map((nombre) => (
+                        <div
+                          key={nombre}
+                          className="apt-dropdown-option"
+                          onClick={() => { setNombreQuery(nombre); setSugerenciasOpen(false); }}
+                        >
+                          <Search size={13} />
+                          <span>{nombre}</span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
-              )}
+
+                {/* Filtro: Categoría (multi-select, familia de SF) */}
+                <div className="apt-filtro-control" ref={categoriaDropdownRef}>
+                  <div
+                    className={`apt-dropdown-trigger ${categoriaDropdownOpen ? 'open' : ''} ${categoriasSel.length > 0 ? 'has-value' : ''} ${categorias.length === 0 ? 'disabled' : ''}`}
+                    onClick={() => categorias.length > 0 && setCategoriaDropdownOpen((v) => !v)}
+                  >
+                    <Home size={15} className="apt-dropdown-icon-left" />
+                    <div className="apt-dropdown-multilabel">
+                      {categoriasSel.length === 0
+                        ? <span className="apt-dropdown-placeholder">{categorias.length === 0 ? 'No hay categorías' : 'Categoría...'}</span>
+                        : <span>{categoriasSel.length === 1 ? categoriasSel[0] : `${categoriasSel.length} categorías`}</span>
+                      }
+                    </div>
+                    <ChevronDown size={15} className={`apt-dropdown-chevron ${categoriaDropdownOpen ? 'rotated' : ''}`} />
+                  </div>
+                  {categoriaDropdownOpen && categorias.length > 0 && (
+                    <div className="apt-dropdown-panel">
+                      {categorias.map((cat) => {
+                        const checked = categoriasSel.includes(cat);
+                        return (
+                          <div
+                            key={cat}
+                            className={`apt-dropdown-option ${checked ? 'selected' : ''}`}
+                            onClick={() => toggleCategoria(cat)}
+                          >
+                            <span className={`apt-checkbox ${checked ? 'checked' : ''}`}>
+                              {checked && <CheckCircle size={11} />}
+                            </span>
+                            <span>{cat}</span>
+                            <span className="apt-dropdown-count">
+                              {inventario.filter((u) => u.tipo === cat && u.status === 'Disponible').length}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Filtro: Proyecto (multi-select) */}
+                <div className="apt-filtro-control" ref={proyectoDropdownRef}>
+                  <div
+                    className={`apt-dropdown-trigger ${proyectoDropdownOpen ? 'open' : ''} ${proyectosSel.length > 0 ? 'has-value' : ''} ${proyectos.length === 0 ? 'disabled' : ''}`}
+                    onClick={() => proyectos.length > 0 && setProyectoDropdownOpen((v) => !v)}
+                  >
+                    <Building2 size={15} className="apt-dropdown-icon-left" />
+                    <div className="apt-dropdown-multilabel">
+                      {proyectosSel.length === 0
+                        ? <span className="apt-dropdown-placeholder">{proyectos.length === 0 ? 'No hay proyectos' : 'Proyecto...'}</span>
+                        : <span>{proyectosSel.length === 1 ? proyectosSel[0].nombre : `${proyectosSel.length} proyectos`}</span>
+                      }
+                    </div>
+                    <ChevronDown size={15} className={`apt-dropdown-chevron ${proyectoDropdownOpen ? 'rotated' : ''}`} />
+                  </div>
+                  {proyectoDropdownOpen && proyectos.length > 0 && (
+                    <div className="apt-dropdown-panel">
+                      {proyectos.map((p) => {
+                        const checked = proyectosSel.some((x) => x.id === p.id);
+                        return (
+                          <div
+                            key={p.id}
+                            className={`apt-dropdown-option ${checked ? 'selected' : ''}`}
+                            onClick={() => toggleProyecto(p)}
+                          >
+                            <span className={`apt-checkbox ${checked ? 'checked' : ''}`}>
+                              {checked && <CheckCircle size={11} />}
+                            </span>
+                            <span>{p.nombre}</span>
+                            <span className="apt-dropdown-count">
+                              {inventario.filter((u) => u.proyectoId === p.id && u.status === 'Disponible').length}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {proyectoSel && (
-              <div className="apt-filtro-activo">
-                <Building2 size={13} /> Proyecto: <strong>{proyectoSel.nombre}</strong>
-                <button onClick={limpiarFiltro} type="button"><X size={12} /></button>
+            {/* Chips de filtros activos */}
+            {totalFiltrosActivos > 0 && (
+              <div className="apt-chips-row">
+                {nombreQ && (
+                  <div className="apt-filtro-activo">
+                    <Search size={13} /> "{nombreQuery}"
+                    <button onClick={() => setNombreQuery('')} type="button"><X size={12} /></button>
+                  </div>
+                )}
+                {categoriasSel.map((cat) => (
+                  <div key={`cat-${cat}`} className="apt-filtro-activo">
+                    <Home size={13} /> {cat}
+                    <button onClick={() => toggleCategoria(cat)} type="button"><X size={12} /></button>
+                  </div>
+                ))}
+                {proyectosSel.map((p) => (
+                  <div key={`proy-${p.id}`} className="apt-filtro-activo">
+                    <Building2 size={13} /> {p.nombre}
+                    <button onClick={() => toggleProyecto(p)} type="button"><X size={12} /></button>
+                  </div>
+                ))}
+                {totalFiltrosActivos > 1 && (
+                  <button className="apt-link-btn apt-chips-clear" onClick={limpiarTodo} type="button">
+                    Limpiar todo
+                  </button>
+                )}
               </div>
             )}
 
             {inventarioFiltrado.length === 0 && (
               <div className="apt-empty">
                 <Home size={32} />
-                <p>{proyectoSel ? `No hay unidades disponibles en "${proyectoSel.nombre}".` : 'No hay unidades disponibles.'}</p>
-                {proyectoSel && <button className="apt-link-btn" onClick={limpiarFiltro}>Ver todos los proyectos</button>}
+                <p>
+                  {totalFiltrosActivos > 0
+                    ? 'No hay unidades que coincidan con los filtros aplicados.'
+                    : 'No hay unidades disponibles.'}
+                </p>
+                {totalFiltrosActivos > 0 && <button className="apt-link-btn" onClick={limpiarTodo}>Limpiar filtros</button>}
               </div>
             )}
 
@@ -519,764 +666,3 @@ const ApartadoApp = () => {
 };
 
 export default ApartadoApp;
-
-
-// Datos sinteticos para pruebas
-
-// import React, { useState, useEffect, useCallback } from 'react';
-// import {
-//   Building2,
-//   CheckCircle,
-//   XCircle,
-//   Wifi,
-//   WifiOff,
-//   Sun,
-//   Moon,
-//   ArrowLeft,
-//   AlertTriangle,
-//   Loader2,
-//   DollarSign,
-//   Home,
-//   Hash,
-//   Users,
-//   TrendingUp,
-//   FileCheck,
-//   Search,
-//   ChevronDown,
-//   X,
-// } from 'lucide-react';
-// import './ApartadoApp.css';
-
-// // ─── CONFIG ──────────────────────────────────────────────────────────────────
-// // Cambia estas URLs por las de tu instancia n8n
-// const API_BASE = 'https://grupo-veq-n8n-grupo-veq.adsfsj.easypanel.host/webhook';
-// const ENDPOINTS = {
-//   catalogo: `${API_BASE}/apartado/catalogo`,        // GET inventario disponible
-//   verificar: `${API_BASE}/apartado/verificar`,       // POST verificar disponibilidad
-//   confirmar: `${API_BASE}/apartado/confirmar`,       // POST registrar apartado
-//   contador: `${API_BASE}/apartado/contador`,        // GET contador del evento
-// };
-
-// // ─── MODO DEMO (activo cuando el backend no responde) ────────────────────────
-// const MOCK_DATA = {
-//   contexto: {
-//     asesor: 'Ana García',
-//     invitado: 'Juan Pérez',
-//     evento: 'Open House Primavera 2025',
-//     eventoId: 'EVT-DEMO-001',
-//   },
-//   contador: {
-//     apartados: 3,
-//     umbral: 10,
-//     precioActual: 3500000,
-//   },
-//   proyectos: [
-//     { id: 'P-01', nombre: 'Cumbres Santa Fe' },
-//     { id: 'P-02', nombre: 'Bosques de las Lomas' },
-//     { id: 'P-03', nombre: 'Punto Sur' },
-//     { id: 'P-04', nombre: 'Lirica' }
-//   ],
-//   unidades: [
-//     { id: 'U-101', nombre: 'A-101', torre: 'Torre A', tipo: 'Departamento', m2: 85, recamaras: 2, precio: 3500000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-01', proyectoNombre: 'Cumbres Santa Fe' },
-//     { id: 'U-102', nombre: 'A-102', torre: 'Torre A', tipo: 'Departamento', m2: 92, recamaras: 2, precio: 3750000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-01', proyectoNombre: 'Cumbres Santa Fe' },
-//     { id: 'U-103', nombre: 'A-103', torre: 'Torre A', tipo: 'Departamento', m2: 110, recamaras: 3, precio: 4200000, montoApartado: 120000, status: 'Disponible', proyectoId: 'P-02', proyectoNombre: 'Bosques de las Lomas' },
-//     { id: 'U-201', nombre: 'B-201', torre: 'Torre B', tipo: 'Penthouse', m2: 180, recamaras: 3, precio: 6800000, montoApartado: 200000, status: 'Disponible', proyectoId: 'P-02', proyectoNombre: 'Bosques de las Lomas' },
-//     { id: 'U-202', nombre: 'B-202', torre: 'Torre B', tipo: 'Departamento', m2: 78, recamaras: 2, precio: 3200000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-03', proyectoNombre: 'Punto Sur' },
-//     { id: 'U-203', nombre: 'B-203', torre: 'Torre B', tipo: 'Departamento', m2: 95, recamaras: 2, precio: 3600000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-03', proyectoNombre: 'Punto Sur' },
-//     { id: 'U-204', nombre: 'B-204', torre: 'Torre B', tipo: 'Departamento', m2: 88, recamaras: 2, precio: 3400000, montoApartado: 100000, status: 'Apartado', proyectoId: 'P-01', proyectoNombre: 'Cumbres Santa Fe' },
-//     { id: 'U-205', nombre: 'B-205', torre: 'Torre B', tipo: 'Departamento', m2: 82, recamaras: 2, precio: 3300000, montoApartado: 100000, status: 'Apartado', proyectoId: 'P-02', proyectoNombre: 'Bosques de las Lomas' },
-//     { id: 'U-206', nombre: 'B-206', torre: 'Torre B', tipo: 'Departamento', m2: 90, recamaras: 2, precio: 3500000, montoApartado: 100000, status: 'Disponible', proyectoId: 'P-03', proyectoNombre: 'Lirica' },
-//     { id: 'U-207', nombre: 'B-207', torre: 'Torre B', tipo: 'Departamento', m2: 85, recamaras: 2, precio: 3400000, montoApartado: 100000, status: 'Apartado', proyectoId: 'P-01', proyectoNombre: 'Lirica' }
-//   ],
-// };
-
-// // ─── HELPERS ─────────────────────────────────────────────────────────────────
-// const fmt = (n) =>
-//   new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n);
-
-// const parseUrlParams = () => {
-//   const params = new URLSearchParams(window.location.search);
-//   return {
-//     invitadoId: params.get('invitadoId') || params.get('invitado') || null,
-//     oppId: params.get('oppId') || params.get('opp') || null,
-//     token: params.get('token') || null,
-//     eventId: params.get('eventId') || params.get('evento') || null,
-//   };
-// };
-
-// // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-// const ApartadoApp = () => {
-//   // Contexto de URL
-//   const [urlParams] = useState(parseUrlParams);
-
-//   // Pantalla activa: 'catalogo' | 'formulario' | 'confirmado' | 'error'
-//   const [screen, setScreen] = useState('catalogo');
-
-//   // Datos
-//   const [inventario, setInventario] = useState([]);
-//   const [proyectos, setProyectos] = useState([]);   // lista completa de proyectos
-//   const [unidadSel, setUnidadSel] = useState(null);
-//   const [contexto, setContexto] = useState(null);
-//   const [operacion, setOperacion] = useState(null);
-//   const [contador, setContador] = useState(null);
-
-//   // Dropdown de proyecto
-//   const [proyectoSel, setProyectoSel] = useState(null);   // { id, nombre } | null
-//   const [dropdownQuery, setDropdownQuery] = useState('');      // texto que escribe el usuario
-//   const [dropdownOpen, setDropdownOpen] = useState(false);   // visibilidad del panel
-//   const dropdownRef = React.useRef(null);
-
-//   // Formulario
-//   const [form, setForm] = useState({
-//     precioVenta: '',
-//     montoApartado: '',
-//     enganche: '',
-//     financiamiento: '',
-//     entrega: '',
-//     mensualidades: '',
-//     fechaMensualidad: '',
-//   });
-
-//   // UI state
-//   const [loading, setLoading] = useState(true);
-//   const [submitting, setSubmitting] = useState(false);
-//   const [error, setError] = useState(null);
-//   const [isDemoMode, setIsDemoMode] = useState(false);
-//   const [isOnline, setIsOnline] = useState(navigator.onLine);
-//   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
-
-//   useEffect(() => {
-//     localStorage.setItem('theme', theme);
-//     document.documentElement.setAttribute('data-theme', theme);
-//   }, [theme]);
-
-//   useEffect(() => {
-//     const up = () => setIsOnline(true);
-//     const down = () => setIsOnline(false);
-//     window.addEventListener('online', up);
-//     window.addEventListener('offline', down);
-//     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
-//   }, []);
-
-//   // Cerrar dropdown al hacer click fuera
-//   useEffect(() => {
-//     const handler = (e) => {
-//       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-//         setDropdownOpen(false);
-//       }
-//     };
-//     document.addEventListener('mousedown', handler);
-//     return () => document.removeEventListener('mousedown', handler);
-//   }, []);
-
-//   // ── Cargar catálogo e info de contexto ──
-//   const cargarCatalogo = useCallback(async () => {
-//     setLoading(true);
-//     setError(null);
-//     try {
-//       const res = await fetch(ENDPOINTS.catalogo, {
-//         method: 'POST',
-//         headers: { 'Content-Type': 'application/json' },
-//         body: JSON.stringify({
-//           invitadoId: urlParams.invitadoId,
-//           oppId: urlParams.oppId,
-//           token: urlParams.token,
-//           eventId: urlParams.eventId,
-//         }),
-//       });
-//       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-//       const data = await res.json();
-
-//       // Esperamos: { unidades: [...], proyectos: [...], contexto: {...}, contador: {...} }
-//       setInventario(data.unidades || []);
-//       setProyectos(data.proyectos || []);
-//       setContexto(data.contexto || null);
-//       setContador(data.contador || null);
-//     } catch (err) {
-//       // Backend no disponible → modo demo con datos mock
-//       console.warn('[ApartadoApp] Backend no disponible, usando datos demo:', err.message);
-//       setInventario(MOCK_DATA.unidades);
-//       setProyectos(MOCK_DATA.proyectos);
-//       setContexto(MOCK_DATA.contexto);
-//       setContador(MOCK_DATA.contador);
-//       setError(null); // no mostrar error, el demo se ve limpio
-//       setIsDemoMode(true);
-//     } finally {
-//       setLoading(false);
-//     }
-//   }, [urlParams]);
-
-//   useEffect(() => { cargarCatalogo(); }, [cargarCatalogo]);
-
-//   // ── Seleccionar unidad → ir a formulario ──
-//   const seleccionarUnidad = (unidad) => {
-//     setUnidadSel(unidad);
-//     setForm((prev) => ({
-//       ...prev,
-//       precioVenta: String(unidad.precio || ''),
-//       montoApartado: String(unidad.montoApartado || ''),
-//       enganche: '',
-//       financiamiento: '',
-//       entrega: '',
-//       mensualidades: '',
-//       fechaMensualidad: '',
-//     }));
-//     setScreen('formulario');
-//     setError(null);
-//   };
-
-//   // ── Validar suma esquema de pago ──
-//   const totalEsquema = () => {
-//     const e = Number(form.enganche) || 0;
-//     const f = Number(form.financiamiento) || 0;
-//     const d = Number(form.entrega) || 0;
-//     return e + f + d;
-//   };
-
-//   const esquemaValido = () => totalEsquema() === 100;
-
-//   // ── Confirmar apartado ──
-//   const confirmarApartado = async () => {
-//     if (!esquemaValido()) {
-//       setError('La suma de Enganche + Financiamiento + Entrega debe ser exactamente 100%.');
-//       return;
-//     }
-//     setSubmitting(true);
-//     setError(null);
-
-//     // ── MODO DEMO: simular confirmación sin backend ──
-//     if (isDemoMode) {
-//       await new Promise((r) => setTimeout(r, 1200)); // simula latencia
-//       setOperacion({
-//         operacionId: 'EV-VEQ-DEMO-001',
-//         email: 'juan.perez@demo.com',
-//         whatsapp: '+52 33 1234 5678',
-//         contador: { apartados: (contador?.apartados || 0) + 1, umbral: contador?.umbral || 10, precioActual: contador?.precioActual || 3500000 },
-//         message: 'Pre-apartado registrado exitosamente (modo demo)',
-//       });
-//       setSubmitting(false);
-//       setScreen('confirmado');
-//       return;
-//     }
-
-//     const payload = {
-//       invitadoId: urlParams.invitadoId,
-//       oppId: urlParams.oppId,
-//       token: urlParams.token,
-//       eventId: urlParams.eventId,
-//       unidadId: unidadSel.id,
-//       unidadNombre: unidadSel.nombre,
-//       precioVenta: Number(form.precioVenta),
-//       montoApartado: Number(form.montoApartado),
-//       esquemaPago: {
-//         enganche: Number(form.enganche),
-//         financiamiento: Number(form.financiamiento),
-//         entrega: Number(form.entrega),
-//       },
-//       mensualidades: form.mensualidades ? Number(form.mensualidades) : null,
-//       fechaMensualidad: form.fechaMensualidad || null,
-//       timestamp: new Date().toISOString(),
-//     };
-
-//     try {
-//       // 1. Verificar disponibilidad anti-colisión
-//       const verRes = await fetch(ENDPOINTS.verificar, {
-//         method: 'POST',
-//         headers: { 'Content-Type': 'application/json' },
-//         body: JSON.stringify({ unidadId: unidadSel.id, token: urlParams.token }),
-//       });
-//       const verData = await verRes.json();
-//       if (!verRes.ok || verData.disponible === false) {
-//         setError('⚠️ Unidad no disponible. Selecciona otra unidad.');
-//         setSubmitting(false);
-//         setScreen('catalogo');
-//         await cargarCatalogo();
-//         return;
-//       }
-
-//       // 2. Registrar apartado
-//       const confRes = await fetch(ENDPOINTS.confirmar, {
-//         method: 'POST',
-//         headers: { 'Content-Type': 'application/json' },
-//         body: JSON.stringify(payload),
-//       });
-//       const confData = await confRes.json();
-//       if (!confRes.ok) throw new Error(confData.error || 'Error al confirmar');
-
-//       setOperacion(confData);
-//       setContador(confData.contador || contador);
-//       setScreen('confirmado');
-//     } catch (err) {
-//       setError('Error al procesar el apartado: ' + err.message);
-//     } finally {
-//       setSubmitting(false);
-//     }
-//   };
-
-//   const toggleTheme = () => setTheme((p) => (p === 'dark' ? 'light' : 'dark'));
-
-//   // ── Derived: opciones del dropdown filtradas por query ──
-//   const opcionesDropdown = proyectos.filter((p) =>
-//     p.nombre.toLowerCase().includes(dropdownQuery.toLowerCase())
-//   );
-
-//   // ── Derived: unidades filtradas por proyecto seleccionado ──
-//   const inventarioFiltrado = proyectoSel
-//     ? inventario.filter((u) => u.proyectoId === proyectoSel.id)
-//     : inventario;
-
-//   const limpiarFiltro = () => {
-//     setProyectoSel(null);
-//     setDropdownQuery('');
-//     setDropdownOpen(false);
-//   };
-
-//   // ─────────────────────────────────────────────────────────────────────────────
-//   // RENDER
-//   // ─────────────────────────────────────────────────────────────────────────────
-//   return (
-//     <div className={`apt-app ${theme === 'dark' ? 'theme-dark' : 'theme-light'}`}>
-
-//       {/* ── HEADER ── */}
-//       <header className="apt-header">
-//         <div className="apt-header-inner">
-//           <div className="apt-header-left">
-//             {screen === 'formulario' && (
-//               <button className="apt-back-btn" onClick={() => { setScreen('catalogo'); setError(null); }}>
-//                 <ArrowLeft size={16} /> Catálogo
-//               </button>
-//             )}
-//             <div>
-//               <div className="apt-header-title">Eventos VEQ - Pre-apartado de Unidad</div>
-//               <div className="apt-header-subtitle">Confirma tu apartado y esquema de pago</div>
-//             </div>
-//           </div>
-
-//           <div className="apt-header-actions">
-//             <div className={`apt-status-badge ${isOnline ? 'online' : 'offline'}`}>
-//               {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
-//               {isOnline ? 'En línea' : 'Sin conexión'}
-//             </div>
-//             <button className="apt-icon-btn" onClick={toggleTheme} type="button">
-//               {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-//               {theme === 'dark' ? 'Claro' : 'Oscuro'}
-//             </button>
-//           </div>
-//         </div>
-
-//         {/* Tarjetas de contexto */}
-//         {contexto && (
-//           <div className="apt-context-bar">
-//             <div className="apt-ctx-chip">
-//               <Users size={14} /> Asesor: <strong>{contexto.asesor || '—'}</strong>
-//             </div>
-//             <div className="apt-ctx-chip">
-//               <Users size={14} /> Invitado: <strong>{contexto.invitado || '—'}</strong>
-//             </div>
-//             <div className="apt-ctx-chip confirmed">
-//               <CheckCircle size={14} /> Estado: <strong>Confirmado (Asistió)</strong>
-//             </div>
-//           </div>
-//         )}
-//       </header>
-
-//       <main className="apt-main">
-
-//         {/* ── BANNER MODO DEMO ── */}
-//         {isDemoMode && (
-//           <div className="apt-demo-banner">
-//             🧪 <strong>Modo demo</strong> — datos simulados. Conecta n8n para usar datos reales de Salesforce.
-//           </div>
-//         )}
-
-//         {/* ── CONTADOR DEL EVENTO ── */}
-//         {contador && (
-//           <section className="apt-counter-bar">
-//             <div className="apt-counter-item">
-//               <Hash size={14} /> Apartados: <strong>{contador.apartados}</strong>
-//             </div>
-//             <div className="apt-counter-item">
-//               <TrendingUp size={14} /> Umbral: <strong>{contador.umbral}</strong>
-//             </div>
-//             <div className="apt-counter-item price">
-//               <DollarSign size={14} /> Precio Vigente: <strong>{fmt(contador.precioActual)}</strong>
-//             </div>
-//             {contador.apartados >= contador.umbral && (
-//               <div className="apt-counter-alert">
-//                 <TrendingUp size={14} /> ¡Umbral alcanzado! Precios actualizados
-//               </div>
-//             )}
-//           </section>
-//         )}
-
-//         {/* ── LOADING ── */}
-//         {loading && (
-//           <div className="apt-center">
-//             <Loader2 className="apt-spinner" size={32} />
-//             <p>Cargando inventario...</p>
-//           </div>
-//         )}
-
-//         {/* ── ERROR GLOBAL ── */}
-//         {error && !loading && (
-//           <div className="apt-alert error">
-//             <AlertTriangle size={16} /> {error}
-//           </div>
-//         )}
-
-//         {/* ══════════════════════════════════════════
-//             PANTALLA 1: CATÁLOGO DE UNIDADES
-//         ══════════════════════════════════════════ */}
-//         {!loading && screen === 'catalogo' && (
-//           <section className="apt-catalogo">
-
-//             {/* ── HEADER del catálogo: título + dropdown ── */}
-//             <div className="apt-catalogo-header">
-//               <div className="apt-section-title">
-//                 <Building2 size={20} /> Inventario Disponible
-//                 <span className="apt-catalogo-count">
-//                   {inventarioFiltrado.length} unidad{inventarioFiltrado.length !== 1 ? 'es' : ''}
-//                 </span>
-//               </div>
-
-//               {/* Dropdown de proyecto */}
-//               {proyectos.length > 0 && (
-//                 <div className="apt-proyecto-dropdown" ref={dropdownRef}>
-//                   <div
-//                     className={`apt-dropdown-trigger ${dropdownOpen ? 'open' : ''} ${proyectoSel ? 'has-value' : ''}`}
-//                     onClick={() => setDropdownOpen((v) => !v)}
-//                   >
-//                     <Search size={15} className="apt-dropdown-icon-left" />
-//                     <input
-//                       className="apt-dropdown-input"
-//                       placeholder="Filtrar por proyecto..."
-//                       value={proyectoSel ? proyectoSel.nombre : dropdownQuery}
-//                       onChange={(e) => {
-//                         setDropdownQuery(e.target.value);
-//                         setProyectoSel(null);   // si escribe, limpia selección previa
-//                         setDropdownOpen(true);
-//                       }}
-//                       onClick={(e) => {
-//                         e.stopPropagation();
-//                         setDropdownOpen(true);
-//                         if (proyectoSel) {
-//                           setDropdownQuery('');
-//                           setProyectoSel(null);
-//                         }
-//                       }}
-//                     />
-//                     {proyectoSel ? (
-//                       <button
-//                         className="apt-dropdown-clear"
-//                         onClick={(e) => { e.stopPropagation(); limpiarFiltro(); }}
-//                         type="button"
-//                         title="Quitar filtro"
-//                       >
-//                         <X size={14} />
-//                       </button>
-//                     ) : (
-//                       <ChevronDown size={15} className={`apt-dropdown-chevron ${dropdownOpen ? 'rotated' : ''}`} />
-//                     )}
-//                   </div>
-
-//                   {dropdownOpen && (
-//                     <div className="apt-dropdown-panel">
-//                       {opcionesDropdown.length === 0 ? (
-//                         <div className="apt-dropdown-empty">Sin resultados para "{dropdownQuery}"</div>
-//                       ) : (
-//                         opcionesDropdown.map((p) => (
-//                           <div
-//                             key={p.id}
-//                             className={`apt-dropdown-option ${proyectoSel?.id === p.id ? 'selected' : ''}`}
-//                             onClick={() => {
-//                               setProyectoSel(p);
-//                               setDropdownQuery('');
-//                               setDropdownOpen(false);
-//                             }}
-//                           >
-//                             <Building2 size={13} />
-//                             <span>{p.nombre}</span>
-//                             <span className="apt-dropdown-count">
-//                               {inventario.filter((u) => u.proyectoId === p.id && u.status === 'Disponible').length} disp.
-//                             </span>
-//                           </div>
-//                         ))
-//                       )}
-//                     </div>
-//                   )}
-//                 </div>
-//               )}
-//             </div>
-
-//             {/* Pill del filtro activo */}
-//             {proyectoSel && (
-//               <div className="apt-filtro-activo">
-//                 <Building2 size={13} /> Proyecto: <strong>{proyectoSel.nombre}</strong>
-//                 <button onClick={limpiarFiltro} type="button"><X size={12} /></button>
-//               </div>
-//             )}
-
-//             {inventarioFiltrado.length === 0 && !error && (
-//               <div className="apt-empty">
-//                 <Home size={32} />
-//                 <p>
-//                   {proyectoSel
-//                     ? `No hay unidades disponibles en "${proyectoSel.nombre}".`
-//                     : 'No hay unidades disponibles en este momento.'}
-//                 </p>
-//                 {proyectoSel && (
-//                   <button className="apt-link-btn" onClick={limpiarFiltro}>Ver todos los proyectos</button>
-//                 )}
-//               </div>
-//             )}
-
-//             <div className="apt-grid">
-//               {inventarioFiltrado.map((u) => (
-//                 <div
-//                   key={u.id}
-//                   className={`apt-unit-card ${u.status === 'Disponible' ? '' : 'unavailable'}`}
-//                   onClick={() => u.status === 'Disponible' && seleccionarUnidad(u)}
-//                 >
-//                   <div className="apt-unit-header">
-//                     <div className="apt-unit-nombre">{u.nombre}</div>
-//                     <div className={`apt-unit-badge ${u.status === 'Disponible' ? 'disponible' : 'no-disp'}`}>
-//                       {u.status}
-//                     </div>
-//                   </div>
-
-//                   <div className="apt-unit-details">
-//                     {u.proyectoNombre && <span className="apt-unit-proyecto"><Building2 size={11} /> {u.proyectoNombre}</span>}
-//                     {u.torre && <span><Building2 size={12} /> {u.torre}</span>}
-//                     {u.tipo && <span><Home size={12} /> {u.tipo}</span>}
-//                     {u.m2 && <span>📐 {u.m2} m²</span>}
-//                     {u.recamaras && <span>🛏 {u.recamaras} rec</span>}
-//                   </div>
-
-//                   <div className="apt-unit-precio">{fmt(u.precio)}</div>
-
-//                   {u.status === 'Disponible' && (
-//                     <button className="apt-select-btn">
-//                       Seleccionar unidad →
-//                     </button>
-//                   )}
-//                 </div>
-//               ))}
-//             </div>
-//           </section>
-//         )}
-
-//         {/* ══════════════════════════════════════════
-//             PANTALLA 2: FORMULARIO DE PRE-APARTADO
-//         ══════════════════════════════════════════ */}
-//         {!loading && screen === 'formulario' && unidadSel && (
-//           <section className="apt-form-section">
-//             <div className="apt-form-card">
-//               <div className="apt-form-card-header">
-//                 <Building2 size={22} />
-//                 <div>
-//                   <div className="apt-form-titulo">
-//                     Formulario de Pre-apartado: {unidadSel.torre} - Unidad {unidadSel.nombre}
-//                   </div>
-//                 </div>
-//               </div>
-
-//               {/* Fila 1: Precio + Monto */}
-//               <div className="apt-form-row">
-//                 <div className="apt-form-field">
-//                   <label>Precio de Venta <span className="apt-editable">(Editable)</span></label>
-//                   <div className="apt-input-prefix">
-//                     <span>$</span>
-//                     <input
-//                       type="number"
-//                       value={form.precioVenta}
-//                       onChange={(e) => setForm((p) => ({ ...p, precioVenta: e.target.value }))}
-//                       placeholder="3,500,000"
-//                     />
-//                   </div>
-//                 </div>
-//                 <div className="apt-form-field">
-//                   <label>Monto de Apartado</label>
-//                   <div className="apt-input-prefix">
-//                     <span>$</span>
-//                     <input
-//                       type="number"
-//                       value={form.montoApartado}
-//                       onChange={(e) => setForm((p) => ({ ...p, montoApartado: e.target.value }))}
-//                       placeholder="100,000"
-//                     />
-//                   </div>
-//                 </div>
-//               </div>
-
-//               {/* Esquema de pago */}
-//               <div className="apt-form-field apt-full">
-//                 <label>
-//                   Esquema de Pago
-//                   <span className={`apt-total-badge ${esquemaValido() ? 'ok' : 'bad'}`}>
-//                     Total: {totalEsquema()}%
-//                   </span>
-//                 </label>
-//                 <div className="apt-esquema-row">
-//                   <div className="apt-esquema-item">
-//                     <input
-//                       type="number"
-//                       min="0" max="100"
-//                       value={form.enganche}
-//                       onChange={(e) => setForm((p) => ({ ...p, enganche: e.target.value }))}
-//                       placeholder="0"
-//                     />
-//                     <span>% Enganche</span>
-//                   </div>
-//                   <div className="apt-esquema-item">
-//                     <input
-//                       type="number"
-//                       min="0" max="100"
-//                       value={form.financiamiento}
-//                       onChange={(e) => setForm((p) => ({ ...p, financiamiento: e.target.value }))}
-//                       placeholder="0"
-//                     />
-//                     <span>% Financiamiento</span>
-//                   </div>
-//                   <div className="apt-esquema-item">
-//                     <input
-//                       type="number"
-//                       min="0" max="100"
-//                       value={form.entrega}
-//                       onChange={(e) => setForm((p) => ({ ...p, entrega: e.target.value }))}
-//                       placeholder="0"
-//                     />
-//                     <span>% Entrega</span>
-//                   </div>
-//                 </div>
-//                 {/* Barra visual */}
-//                 <div className="apt-progress-track">
-//                   <div
-//                     className="apt-progress-fill"
-//                     style={{ width: `${Math.min(totalEsquema(), 100)}%` }}
-//                   />
-//                 </div>
-//               </div>
-
-//               {/* Mensualidades */}
-//               <div className="apt-form-row">
-//                 <div className="apt-form-field">
-//                   <label>Número de Mensualidades (If applicable)</label>
-//                   <input
-//                     type="number"
-//                     value={form.mensualidades}
-//                     onChange={(e) => setForm((p) => ({ ...p, mensualidades: e.target.value }))}
-//                     placeholder="12"
-//                   />
-//                 </div>
-//                 <div className="apt-form-field">
-//                   <label>Fecha de Inicio de Mensualidad</label>
-//                   <input
-//                     type="date"
-//                     value={form.fechaMensualidad}
-//                     onChange={(e) => setForm((p) => ({ ...p, fechaMensualidad: e.target.value }))}
-//                   />
-//                 </div>
-//               </div>
-
-//               {/* Resumen */}
-//               <div className="apt-resumen-bar">
-//                 <span className="apt-resumen-label">Resumen de Selección</span>
-//                 <span className="apt-resumen-value">
-//                   {unidadSel.torre ? `${unidadSel.torre} - ` : ''}{unidadSel.nombre}
-//                   {form.precioVenta ? ` · ${fmt(form.precioVenta)}` : ''}
-//                 </span>
-//               </div>
-
-//               {error && (
-//                 <div className="apt-alert error">
-//                   <AlertTriangle size={14} /> {error}
-//                 </div>
-//               )}
-
-//               <button
-//                 className="apt-confirm-btn"
-//                 onClick={confirmarApartado}
-//                 disabled={submitting || !esquemaValido()}
-//               >
-//                 {submitting ? (
-//                   <><Loader2 size={16} className="apt-spinner-sm" /> Procesando...</>
-//                 ) : (
-//                   <><FileCheck size={16} /> Confirmar Apartado</>
-//                 )}
-//               </button>
-
-//               {!esquemaValido() && (
-//                 <p className="apt-hint">La suma del esquema de pago debe ser exactamente 100%.</p>
-//               )}
-//             </div>
-//           </section>
-//         )}
-
-//         {/* ══════════════════════════════════════════
-//             PANTALLA 3: RESUMEN DE CONFIRMACIÓN
-//         ══════════════════════════════════════════ */}
-//         {screen === 'confirmado' && operacion && (
-//           <section className="apt-confirmado">
-//             <div className="apt-confirm-card">
-//               <div className="apt-confirm-header">
-//                 <div className="apt-confirm-icon"><CheckCircle size={28} /></div>
-//                 <div>
-//                   <div className="apt-confirm-title">Pre-apartado Confirmado</div>
-//                   <div className="apt-confirm-id">ID de Operación: {operacion.operacionId || operacion.id || 'EV-VEQ-' + Date.now()}</div>
-//                 </div>
-//               </div>
-
-//               <div className="apt-confirm-grid">
-//                 <div><span>Unidad:</span> <strong>{unidadSel?.torre} - {unidadSel?.nombre}</strong></div>
-//                 <div><span>Invitado:</span> <strong>{contexto?.invitado}</strong></div>
-//                 <div><span>Asesor:</span> <strong>{contexto?.asesor}</strong></div>
-//                 <div><span>Precio de Venta:</span> <strong>{fmt(form.precioVenta)}</strong></div>
-//                 <div><span>Monto de Apartado:</span> <strong>{fmt(form.montoApartado)}</strong></div>
-//                 <div>
-//                   <span>Esquema:</span>
-//                   <strong>{form.enganche}% E + {form.financiamiento}% F + {form.entrega}% D</strong>
-//                 </div>
-//               </div>
-
-//               {/* Confirmación de contacto */}
-//               <div className="apt-contact-confirm">
-//                 <div className="apt-contact-confirm-title">Confirmación de Contacto del Cliente</div>
-//                 <p>
-//                   Para proceder, por favor <strong>confirme verbalmente con el cliente</strong> que
-//                   los siguientes datos de contacto registrados son correctos. De lo contrario,
-//                   actualice los registros en la pestaña de "Detalles de Contacto" antes de finalizar.
-//                 </p>
-//                 {operacion.email && (
-//                   <div className="apt-contact-row">
-//                     <CheckCircle size={14} /> Correo: <span>{operacion.email}</span>
-//                   </div>
-//                 )}
-//                 {operacion.whatsapp && (
-//                   <div className="apt-contact-row">
-//                     <CheckCircle size={14} /> WhatsApp: <span>{operacion.whatsapp}</span>
-//                   </div>
-//                 )}
-//               </div>
-
-//               <button
-//                 className="apt-home-btn"
-//                 onClick={() => {
-//                   setScreen('catalogo');
-//                   setUnidadSel(null);
-//                   setOperacion(null);
-//                   setError(null);
-//                   cargarCatalogo();
-//                 }}
-//               >
-//                 Volver al Inicio
-//               </button>
-//             </div>
-//           </section>
-//         )}
-
-//       </main>
-//     </div>
-//   );
-// };
-
-// export default ApartadoApp;
